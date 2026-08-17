@@ -82,7 +82,9 @@ Les quatre façades, le registre, le cycle de vie, l'ordonnanceur et le téléch
 implémentés et couverts par 640 tests, dont des tests d'API de bout en bout et une suite de
 conformité rejouant la logique d'`ollama-gateway`.
 
-**Ce qui reste non vérifié** : l'inférence sur un vrai modèle GGUF (voir « Limites connues »).
+La chaîne est vérifiée de bout en bout sur un **vrai `llama-server`** compilé depuis l'upstream,
+chargeant un **vrai modèle GGUF** et générant de vrais tokens.
+
 L'état réel, unité par unité, est tenu dans **`docs/BACKLOG.md`**, qui fait foi — une unité n'y
 passe `[x]` qu'après validation complète de sa Definition of Done.
 
@@ -122,9 +124,10 @@ cmake --build build --target llama-server -j"$(nproc)"
 | `./runProd` | environnement de production (exige `.env.prod`) |
 | `python -m ollamacpp` | lancement direct, sans conteneur |
 | `python scripts/seed.py --verify` | installe un modèle de démonstration et vérifie l'inférence |
+| `python scripts/make_test_model.py --output m.gguf` | génère un vrai GGUF minuscule, sans téléchargement |
 | `pytest` | suite de tests (les tests marqués `e2e` sont ignorés sans binaire amont) |
 | `pytest -m conformance` | conformité vis-à-vis d'`ollama-gateway` uniquement |
-| `OLLAMACPP_TEST_LLAMA_SERVER=/chemin/llama-server pytest -m e2e` | contrat avec le vrai binaire `llama-server` |
+| `OLLAMACPP_TEST_LLAMA_SERVER=/chemin/llama-server pytest -m e2e` | bout en bout sur le vrai `llama-server` et un vrai modèle |
 | `docker compose -f docker-compose.dev.yml down -v` | arrêt et réinitialisation des données locales |
 
 Il n'y a **pas d'étape de build** pour le service lui-même : c'est du Python pur. Le seul artefact
@@ -163,13 +166,16 @@ ollamacpp/
   runtime/         superviseur, capacités, cycle de vie, ordonnanceur, mémoire
   api/             façades Ollama, OpenAI, Responses, Anthropic
 tests/             unitaires, intégration, API, conformité, contrat llama-server
-scripts/seed.py    données de démonstration, via les vraies API
+scripts/seed.py            données de démonstration, via les vraies API
+scripts/make_test_model.py modèle GGUF de test, réellement chargeable
 docs/
   ollama.cpp-architecture.md   document fondateur : audit, matrice, plan, risques
   DAT.md                       dossier d'architecture technique
   BACKLOG.md                   état réel du projet, unités OC-xxx (fait foi)
   JOURNAL.md                   décisions et investigations
   PROD_MIGRATIONS.md           contrat de déploiement
+  MODEL_CONFIG.md              manifest et pilotage de llama-server, référence complète
+  REGISTRY.md                  protocole du registre privé
   manual.md                    manuel d'exploitation
   DESIGN_SYSTEM.md             charte d'interface P2Enjoy
 Dockerfile  docker-compose.{dev,staging,prod}.yml  runDev runStaging runProd
@@ -190,12 +196,10 @@ CHANGELOG.md  README.md
   pas lu tel quel.
 - **Pas de GPU dans l'environnement de développement de référence** : le comportement d'offload et
   l'occupation VRAM ne sont pas vérifiables localement. Suivi en risque R11.
-- **Inférence sur un vrai modèle non vérifiée dans cet environnement.** Le binaire `llama-server`
-  a bien été compilé et son contrat vérifié — tous les drapeaux émis par le middleware sont
-  acceptés, `/health` et `/v1/models` répondent conformément —, mais la politique réseau de
-  l'environnement de construction bloque le téléchargement de modèles, donc aucun GGUF réel n'a
-  pu être chargé. La chaîne complète est couverte par un faux `llama-server` implémentant le
-  contrat HTTP amont. Suivi en OC-085 dans `docs/BACKLOG.md`.
+- **Le modèle de test intégré produit du charabia.** `scripts/make_test_model.py` génère un vrai
+  GGUF `llama` (~460 Kio) chargeable par `llama-server`, ce qui permet d'exécuter toute la suite
+  de bout en bout sans télécharger de modèle. Ses poids sont aléatoires : la chaîne complète est
+  vérifiée, mais pas la **qualité** des réponses d'un modèle entraîné.
 - **`/api/pull` n'accepte pas un chemin de fichier local** : ce n'est pas un nom de modèle Ollama
   valide, et Ollama ne l'accepte pas davantage. Un GGUF local s'installe par
   `POST /api/blobs/<digest>` puis `POST /api/create`.
@@ -209,6 +213,10 @@ CHANGELOG.md  README.md
 | `docs/ollama.cpp-architecture.md` | Audit des dépôts amont, matrice de compatibilité `ollama-gateway`, manques, interfaces, plan, risques |
 | `docs/DAT.md` | Composants, flux, données, interfaces, sécurité, déploiement |
 | `docs/BACKLOG.md` | État réel, unité par unité |
+| `docs/MODEL_CONFIG.md` | Manifest, `runtime` et correspondance complète avec les drapeaux `llama-server` |
+| `docs/REGISTRY.md` | Protocole du registre privé : résolution, artefacts, checksums, sécurité |
+| `docs/manual.md` | Manuel d'exploitation |
+| `docs/PROD_MIGRATIONS.md` | Contrat de déploiement |
 | `docs/JOURNAL.md` | Décisions structurantes et leurs justifications |
 | `CHANGELOG.md` | Changements non publiés et publiés |
 

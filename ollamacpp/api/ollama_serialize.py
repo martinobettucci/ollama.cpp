@@ -198,8 +198,31 @@ def list_model_entry(model, capabilities: list[str] | None = None) -> dict[str, 
     return payload
 
 
+def vram_bytes(*, size: int, gpu_layers: int | None, block_count: int) -> int:
+    """Estime la part de l'empreinte réellement placée en VRAM.
+
+    Ce champ n'est pas décoratif : le CLI Ollama en déduit la colonne « PROCESSOR » de
+    `ollama ps` (`cmd/cmd.go` l. 1141-1150) — `0` affiche « 100% CPU », une valeur égale à `size`
+    affiche « 100% GPU », et toute valeur intermédiaire affiche la répartition en pourcentage.
+
+    Renvoyer systématiquement `size` ferait donc annoncer « 100% GPU » à un serveur qui calcule
+    intégralement sur CPU. La valeur est déduite du nombre de couches réellement déportées :
+    aucune couche sur GPU signifie aucune VRAM.
+
+    Approximation assumée : `llama-server` n'expose pas l'occupation VRAM réelle, et les couches
+    n'ont pas toutes le même poids. La répartition est donc proportionnelle au nombre de couches,
+    ce qui donne un ordre de grandeur juste et une colonne « PROCESSOR » honnête.
+    """
+    if not gpu_layers:  # `None` (non configuré) ou `0` (CPU explicite)
+        return 0
+    if block_count > 0 and gpu_layers < block_count:
+        return int(size * gpu_layers / block_count)
+    return size
+
+
 def process_model_entry(
-    resident, *, size: int, digest: str, details: dict[str, Any], now: dt.datetime
+    resident, *, size: int, size_vram: int, digest: str, details: dict[str, Any],
+    now: dt.datetime
 ) -> dict[str, Any]:
     """Entrée de `/api/ps` (`api.ProcessModelResponse`).
 
@@ -220,7 +243,7 @@ def process_model_entry(
         "digest": _bare_digest(digest),
         "details": details,
         "expires_at": to_rfc3339(expires),
-        "size_vram": size,
+        "size_vram": size_vram,
         "context_length": resident.context_length,
     }
 

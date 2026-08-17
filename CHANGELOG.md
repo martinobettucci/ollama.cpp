@@ -57,9 +57,24 @@ Toutes les modifications notables de `ollama.cpp`.
 - Suite de conformité (OC-080, OC-081) rejouant la logique exacte d'`ollama-gateway` — sonde
   `_is_served` sur les quinze endpoints de son catalogue, filtrage des listings et injection de
   `options.num_ctx` — contre le service réel.
-- Contrat avec le vrai binaire `llama-server` (OC-085, partiel) : toute ligne de commande
-  produite par le middleware est acceptée par le binaire compilé depuis l'upstream, et sa
-  surface HTTP est vérifiée sur une instance réellement démarrée.
+- Vérification de bout en bout sur un vrai `llama-server` et un vrai modèle GGUF (OC-085) :
+  `scripts/make_test_model.py` produit une architecture `llama` complète et chargeable d'environ
+  460 Kio, ce qui rend la suite exécutable partout sans téléchargement. 22 tests couvrent
+  l'inférence réelle, le streaming, les embeddings, les quatre façades sur une instance unique,
+  le cycle de vie et l'éviction ; 44 tests vérifient que toute ligne de commande produite est
+  acceptée par le binaire.
+- `docs/REGISTRY.md` : spécification du protocole du registre privé, à destination de qui en
+  implémente un.
+- `docs/MODEL_CONFIG.md` : référence complète du manifest et des 26 réglages `runtime`, avec le
+  drapeau `llama-server` correspondant à chacun.
+- Compatibilité vérifiée avec le vrai binaire `ollama` (OC-084) : `list`, `show`, `ps`, `cp`,
+  `rm` et `run` fonctionnent sans adaptation contre `ollama.cpp`.
+
+### Corrigé
+
+- `/api/ps` annonçait `size_vram = size` en toutes circonstances, ce dont le CLI Ollama déduisait
+  « 100% GPU » même sur un serveur calculant intégralement sur CPU. La part en VRAM est désormais
+  déduite des couches réellement déportées.
 - Conteneurisation (OC-090 à OC-094) : `Dockerfile` multi-étapes compilant `llama-server` depuis
   l'upstream à une révision épinglée, fichiers Compose dev/staging/prod, scripts `runDev`,
   `runStaging` et `runProd`, `.env.example` documentant chaque variable, seed de démonstration

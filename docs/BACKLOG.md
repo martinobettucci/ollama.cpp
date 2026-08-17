@@ -147,22 +147,30 @@ les `@verifies` des tests. Ils ne sont jamais réutilisés ni renumérotés.
       *Le même échange conceptuel produit un `CanonicalRequest` structurellement égal.*
 - [~] **OC-083** — Multi-tours ≥ 10 appels d'outils
       *Rôles, identifiants d'appels, résultats, raisonnement, streaming, intention initiale.*
-- [~] **OC-084** — Compatibilité du CLI Ollama
-      *Le protocole que ces commandes utilisent est couvert au niveau HTTP par
-      `tests/test_api_ollama.py` et `tests/test_conformance_gateway.py` (schémas, champs, codes,
-      streaming). L'exécution du **binaire** `ollama` contre `ollama.cpp` n'a pas pu être faite :
-      le binaire n'est pas disponible dans l'environnement de construction et `run` exige un
-      modèle réel (cf. OC-085).*
-- [~] **OC-085** — Bout en bout avec un vrai `llama-server`
-      *VÉRIFIÉ : `llama-server` compilé depuis l'upstream (commit `39be55c`) ; toute ligne de
-      commande produite par OC-031 est acceptée par le binaire réel — l'exécution atteint le
-      chargement du modèle, donc aucun drapeau n'est refusé ; `/health` répond
-      `{"status": "ok"}` et `/v1/models` la forme OpenAI, sur une instance réellement démarrée
-      (`tests/test_llama_server_contract.py`, 44 tests).*
-      *NON VÉRIFIÉ : l'inférence sur un vrai GGUF. La politique réseau de l'environnement de
-      construction bloque le téléchargement de modèles ; aucun GGUF réel n'a pu être chargé.
-      Le reste de la chaîne est couvert par un faux `llama-server` implémentant le contrat HTTP
-      amont. Cette unité reste `[~]` tant qu'une exécution sur modèle réel n'a pas eu lieu.*
+- [x] **OC-084** — Compatibilité du CLI Ollama
+      *VÉRIFIÉ avec le **vrai binaire** `ollama`, compilé depuis les sources amont et exécuté
+      sans adaptation contre un `ollama.cpp` réel : `list`, `show`, `ps`, `cp`, `rm`, `run`, plus
+      les cas d'échec (`rm` et `show` d'un modèle absent). `tests/test_cli_ollama.py`, 12 tests.
+      `pull` n'est pas couvert : il exige une source distante, déjà vérifiée par
+      `tests/test_sources.py` sur un registre HTTP réel.*
+      *Ces tests ont trouvé un défaut réel invisible en JSON : `/api/ps` renvoyait
+      `size_vram = size` en toutes circonstances, ce dont le CLI déduisait « 100% GPU » sur un
+      serveur purement CPU. Corrigé par `vram_bytes`, qui déduit la part en VRAM des couches
+      réellement déportées.*
+
+- [x] **OC-085** — Bout en bout avec un vrai `llama-server`
+      *VÉRIFIÉ intégralement. `llama-server` compilé depuis l'upstream (commit `39be55c`) ; un
+      modèle GGUF `llama` complet et valide est produit par `scripts/make_test_model.py`, chargé
+      par le binaire réel, et génère de vrais tokens. `tests/test_e2e_real_model.py` (22 tests)
+      couvre sur ce modèle réel : identité du catalogue, lecture du GGUF, `/api/chat` streamé et
+      non streamé, `/api/generate`, embeddings sur une seconde instance, les quatre façades sur
+      une instance unique, `/api/ps`, `keep_alive: 0`, rechargement sur `num_ctx`, capacités
+      issues du vrai `/props`, et éviction réelle sous pression.
+      `tests/test_llama_server_contract.py` (44 tests) vérifie en outre que toute ligne de
+      commande produite est acceptée par le binaire.*
+      *Limite restante : le modèle de test a des poids aléatoires, donc son texte est du
+      charabia. La QUALITÉ des réponses d'un modèle entraîné n'est pas vérifiée ici — seule la
+      chaîne l'est. Le comportement d'offload GPU reste non vérifiable (risque R11).*
 
 ## Lot 9 — Exploitation
 

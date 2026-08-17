@@ -209,3 +209,76 @@ voies possibles.
 **Conséquence.** Une capacité en moins, mais alignée sur Ollama et sans comportement surprenant.
 OC-060 passe `[x]` avec cette justification explicite, plutôt que de rester une case à moitié
 cochée.
+
+---
+
+## 2026-08-17 — Inférence réelle : générer un modèle plutôt que le télécharger
+
+**Problème.** La vérification de bout en bout butait sur l'absence de modèle GGUF : la politique
+réseau bloque les CDN de distribution. L'API `huggingface.co` répond, mais tout fichier LFS
+redirige vers `us.aws.cdn.hf.co`, qui refuse la connexion en 403. Sans modèle, OC-085 restait à
+moitié vérifié.
+
+**Observation.** Le problème n'était pas d'obtenir *ce* modèle-là, mais d'obtenir *un* modèle
+valide. Or `llama.cpp` fournit `gguf-py`, qui sait écrire un GGUF, et l'architecture `llama` est
+entièrement décrite par ses métadonnées et ses tenseurs. Un modèle aux poids aléatoires se charge
+et s'exécute exactement comme un modèle entraîné : seule la qualité du texte diffère.
+
+**Décision.** Écrire `scripts/make_test_model.py`, qui produit une architecture `llama` complète
+(2 couches, 64 dimensions, contexte 512, tokenizer SPM, chat template) d'environ 460 Kio. Le
+script devient un outil du projet, pas un artifice de test : il rend la suite de bout en bout
+exécutable partout, sans téléchargement.
+
+**Deux obstacles rencontrés, et ce qu'ils ont appris.**
+
+1. *Premier essai* : vocabulaire des 256 octets. Le modèle a chargé et généré, mais
+   `llama-server` a rejeté la réponse — « output that does not match the expected format ». Les
+   poids aléatoires tiraient des octets au hasard, qui ne formaient pas de l'UTF-8 valide.
+2. *Deuxième essai* : vocabulaire restreint à l'ASCII. Échec à la tokenisation,
+   `unordered_map::at`. Lecture de `llama_vocab::byte_to_token` (`src/llama-vocab.cpp` l. 3900) :
+   SPM cherche `<0xXX>`, puis se rabat sur l'octet brut avec un `.at()` qui lève. Or SPM remplace
+   les espaces par « ▁ » (U+2581), trois octets non-ASCII — un vocabulaire amputé casse donc tout
+   prompt contenant une espace.
+3. *Solution* : conserver les 256 octets pour l'entrée, et contraindre la **sortie** en annulant
+   les lignes de la projection finale correspondant aux octets non-ASCII. Leur logit vaut alors
+   exactement zéro, tandis que celui des tokens autorisés s'étale largement : le maximum est
+   toujours pris parmi les tokens émettables. Un test vérifie la propriété au lieu de la
+   supposer.
+
+**Vérifications réalisées.** `tests/test_e2e_real_model.py` : 22 tests sur l'application
+complète, le vrai binaire `llama-server` et ce vrai modèle. Chargement, `/props`, `/api/chat`
+streamé et non streamé, `/api/generate`, embeddings sur une seconde instance lancée avec
+`--embedding`, les quatre façades servies par une instance unique, `/api/ps`, `keep_alive: 0`,
+rechargement sur `num_ctx`, capacités issues du vrai `/props`, et éviction réelle sous pression —
+avec vérification que le processus évincé est bien arrêté.
+
+**Conséquence.** OC-085 passe `[x]`. La limite restante est nommée explicitement : les poids
+étant aléatoires, la *qualité* des réponses d'un modèle entraîné n'est pas vérifiée. La chaîne,
+elle, l'est intégralement.
+
+---
+
+## 2026-08-17 — Deux manques de documentation signalés par le responsable
+
+**Problème.** Le responsable a relevé deux absences : le protocole du registre privé n'était
+décrit que dans une docstring, et la configuration runtime par modèle n'apparaissait que par
+fragments dans le manuel.
+
+**Observation.** Les deux sont des contrats destinés à des lecteurs extérieurs au code. Qui écrit
+un registre privé a besoin de connaître les codes de réponse, la forme du manifest et le
+caractère obligatoire du checksum. Qui exploite un modèle a besoin de la table complète des
+réglages et de leur drapeau `llama-server`. Une docstring ne remplit ni l'un ni l'autre rôle :
+elle n'est lue que par qui modifie l'implémentation.
+
+**Décision.** Deux documents dédiés.
+
+- `docs/REGISTRY.md` : spécification du protocole — résolution, forme des artefacts, codes de
+  réponse, téléchargement et vérification, raison pour laquelle le checksum est obligatoire,
+  règles de sécurité, et exemple d'un registre minimal tenant en un JSON et des fichiers
+  statiques.
+- `docs/MODEL_CONFIG.md` : référence complète du manifest, table exhaustive des 26 champs
+  `runtime` avec leur drapeau, drapeaux réservés, drapeaux posés systématiquement, ordre de
+  précédence, effet mémoire de chaque réglage, et exemples par cas d'usage.
+
+**Conséquence.** Le manuel et le README renvoient vers ces documents plutôt que d'en dupliquer
+des extraits, qui dériveraient.

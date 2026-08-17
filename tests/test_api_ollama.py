@@ -141,9 +141,37 @@ class TestPs:
         assert len(models) == 1
         entry = models[0]
         assert entry["name"] == "qwen3:8b"
-        assert entry["size_vram"] > 0
+        assert entry["size"] > 0
         assert entry["context_length"] > 0
         assert entry["expires_at"]
+
+    def test_size_vram_nul_sans_offload_gpu(self, client, installed):
+        """Le CLI Ollama déduit « 100% CPU » de `size_vram == 0` (`cmd/cmd.go` l. 1141).
+
+        Renvoyer `size` sans couche déportée ferait annoncer « 100% GPU » à un serveur qui
+        calcule sur CPU.
+        """
+        install_model(installed, "qwen3:8b")
+        client.post("/api/chat", json={"model": "qwen3:8b", "stream": False,
+                                       "messages": [{"role": "user", "content": "x"}]})
+        assert client.get("/api/ps").json()["models"][0]["size_vram"] == 0
+
+    def test_size_vram_reflete_les_couches_deportees(self, client, installed):
+        """Toutes les couches sur GPU : `size_vram == size`, donc « 100% GPU » côté CLI."""
+        install_model(installed, "qwen3:8b", runtime=RuntimeConfig(gpu_layers=99))
+        client.post("/api/chat", json={"model": "qwen3:8b", "stream": False,
+                                       "messages": [{"role": "user", "content": "x"}]})
+        entree = client.get("/api/ps").json()["models"][0]
+        assert entree["size_vram"] == entree["size"]
+
+    def test_size_vram_partiel(self, client, installed):
+        """Offload partiel : le CLI affiche alors une répartition en pourcentage."""
+        # Le GGUF de test déclare 36 couches ; 18 sur GPU, soit la moitié.
+        install_model(installed, "qwen3:8b", runtime=RuntimeConfig(gpu_layers=18))
+        client.post("/api/chat", json={"model": "qwen3:8b", "stream": False,
+                                       "messages": [{"role": "user", "content": "x"}]})
+        entree = client.get("/api/ps").json()["models"][0]
+        assert 0 < entree["size_vram"] < entree["size"]
 
     def test_contexte_reflete_la_configuration(self, client, installed):
         install_model(installed, "qwen3:8b", runtime=RuntimeConfig(context=16384))
@@ -545,3 +573,33 @@ class TestKeepAlivePlanDeControle:
             "messages": [{"role": "user", "content": "x"}],
         })
         assert response.status_code == 400
+
+
+class TestVramBytes:
+    """Unitaire du calcul de `size_vram` (`ollamacpp/api/ollama_serialize.py::vram_bytes`).
+
+    @verifies docs/BACKLOG.md OC-043 « /api/ps », OC-084 « Compatibilité du CLI Ollama »
+    """
+
+    def test_sans_gpu(self):
+        from ollamacpp.api.ollama_serialize import vram_bytes
+
+        assert vram_bytes(size=1000, gpu_layers=None, block_count=32) == 0
+        assert vram_bytes(size=1000, gpu_layers=0, block_count=32) == 0
+
+    def test_toutes_les_couches(self):
+        from ollamacpp.api.ollama_serialize import vram_bytes
+
+        assert vram_bytes(size=1000, gpu_layers=32, block_count=32) == 1000
+        assert vram_bytes(size=1000, gpu_layers=99, block_count=32) == 1000
+
+    def test_offload_partiel_proportionnel(self):
+        from ollamacpp.api.ollama_serialize import vram_bytes
+
+        assert vram_bytes(size=1000, gpu_layers=8, block_count=32) == 250
+
+    def test_nombre_de_couches_inconnu(self):
+        """Sans `block_count`, on ne peut pas répartir : tout ou rien, jamais un chiffre inventé."""
+        from ollamacpp.api.ollama_serialize import vram_bytes
+
+        assert vram_bytes(size=1000, gpu_layers=8, block_count=0) == 1000

@@ -86,6 +86,9 @@ curl http://localhost:11434/api/pull -d '{"model":"<nom-dans-le-registre>"}'
 Le registre doit fournir un **checksum** pour chaque artefact. Sans checksum, le téléchargement
 est refusé : rien ne distinguerait alors un artefact légitime d'un artefact substitué.
 
+Le protocole complet qu'un registre doit implémenter — résolution, format des artefacts, codes de
+réponse, règles de sécurité, exemple minimal — est décrit dans **`docs/REGISTRY.md`**.
+
 ### 3.3 Installer un GGUF déjà présent sur la machine
 
 ```bash
@@ -146,6 +149,9 @@ Après modification, décharger le modèle pour que la nouvelle configuration s'
 ```bash
 curl http://localhost:11434/api/chat -d '{"model":"mon-modele:v1","messages":[],"keep_alive":0}'
 ```
+
+La table **complète** des réglages, avec le drapeau `llama-server` correspondant pour chacun,
+est dans **`docs/MODEL_CONFIG.md`**. Les plus utiles au quotidien :
 
 ### 4.1 Réglages les plus utiles
 

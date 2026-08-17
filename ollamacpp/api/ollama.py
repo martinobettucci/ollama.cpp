@@ -169,10 +169,23 @@ async def ps(request: Request) -> dict[str, Any]:
     models = []
     for resident in service.lifecycle.residents():
         registered = service.registry.try_get(resident.name)
+        taille = resident.estimate.total_bytes
+        couches = (
+            registered.metadata.block_count
+            if registered is not None and registered.metadata is not None
+            else 0
+        )
         models.append(
             serialize.process_model_entry(
                 resident,
-                size=resident.estimate.total_bytes,
+                size=taille,
+                # La part en VRAM est déduite des couches réellement déportées : c'est elle qui
+                # détermine la colonne « PROCESSOR » du CLI Ollama.
+                size_vram=serialize.vram_bytes(
+                    size=taille,
+                    gpu_layers=resident.runtime.gpu_layers,
+                    block_count=couches,
+                ),
                 digest=registered.digest if registered else "",
                 details=registered.details() if registered else {},
                 now=now,
