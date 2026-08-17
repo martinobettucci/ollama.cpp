@@ -20,6 +20,11 @@ Toutes les modifications notables de `ollama.cpp`.
   vers laquelle convergeront les quatre façades.
 - Suite de tests unitaires du noyau, dont la reproduction fidèle de la sonde `_is_served`
   d'`ollama-gateway` et la table de vérité complète de `keep_alive`.
+- Stockage et registre (OC-020 à OC-023) : magasin d'artefacts adressé par contenu avec
+  installation atomique, vérification de checksum et déduplication ; manifests de modèles
+  versionnés dont les artefacts sont des digests et jamais des chemins ; registre donnant à
+  chaque modèle une taille et un digest réels, et lecteur de métadonnées GGUF permettant de
+  servir `/api/tags` et `/api/show` sans charger le modèle.
 
 ## [Publié]
 

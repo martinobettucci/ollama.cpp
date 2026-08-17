@@ -44,15 +44,15 @@ les `@verifies` des tests. Ils ne sont jamais réutilisés ni renumérotés.
 
 ## Lot 2 — Registre et stockage
 
-- [ ] **OC-020** — `BlobStore` adressé par contenu
+- [~] **OC-020** — `BlobStore` adressé par contenu
       *Ingestion atomique, vérification de checksum, déduplication, refus des chemins non
       canoniques (risque R8).*
-- [ ] **OC-021** — Manifests de modèles
+- [~] **OC-021** — Manifests de modèles
       *Schéma versionné, lecture/écriture, validation, `capabilities_override` restrictif.*
-- [ ] **OC-022** — `ModelRegistry`
+- [~] **OC-022** — `ModelRegistry`
       *Résolution de nom, `list`, `get`, `install`, `copy`, `delete`, `size` et `digest` réels
       (risque R4).*
-- [ ] **OC-023** — Métadonnées GGUF
+- [~] **OC-023** — Métadonnées GGUF
       *Lecture de l'en-tête GGUF : architecture, quantisation, contexte, taille de paramètres.*
 
 ## Lot 3 — Runtime
