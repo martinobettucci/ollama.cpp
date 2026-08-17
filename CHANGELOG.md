@@ -51,6 +51,12 @@ Toutes les modifications notables de `ollama.cpp`.
   bloc `tool_result` ne porte que `tool_use_id` — retrouve son nom depuis l'appel corrélé.
 - Tests d'équivalence des quatre façades (OC-082) et de boucles de douze appels d'outils
   successifs (OC-083).
+- Téléchargement de modèles (OC-050, OC-061, OC-062) : registre privé natif avec jeton, checksum
+  obligatoire et installation atomique ; source Hugging Face avec sélection de fichier et
+  association automatique du projecteur ; flux de progression au format Ollama.
+- Suite de conformité (OC-080, OC-081) rejouant la logique exacte d'`ollama-gateway` — sonde
+  `_is_served` sur les quinze endpoints de son catalogue, filtrage des listings et injection de
+  `options.num_ctx` — contre le service réel.
 
 ## [Publié]
 

@@ -98,7 +98,7 @@ les `@verifies` des tests. Ils ne sont jamais réutilisés ni renumérotés.
 
 ## Lot 5 — Plan de contrôle
 
-- [ ] **OC-050** — `POST /api/pull`
+- [~] **OC-050** — `POST /api/pull`
       *Flux de progression NDJSON, statut final `success`, mode `stream:false` attendu par la
       console d'administration d'`ollama-gateway`.*
 - [~] **OC-051** — `DELETE /api/delete`
@@ -112,9 +112,12 @@ les `@verifies` des tests. Ils ne sont jamais réutilisés ni renumérotés.
 
 ## Lot 6 — Sources de modèles
 
-- [ ] **OC-060** — Source système de fichiers
-- [ ] **OC-061** — Source Hugging Face
-- [ ] **OC-062** — Registre privé natif
+- [x] **OC-060** — Source système de fichiers
+      *Décision : un chemin local n'est pas un nom de modèle Ollama valide et Ollama ne l'accepte
+      pas non plus sur `/api/pull`. L'installation d'un GGUF local passe donc par le chemin natif
+      `POST /api/blobs/<digest>` + `POST /api/create` (OC-053, OC-054), vérifié de bout en bout.*
+- [~] **OC-061** — Source Hugging Face
+- [~] **OC-062** — Registre privé natif
       *URL, jeton, en-tête `Authorization`, checksums, cache local, installation atomique,
       reprise de téléchargement ; aucun secret journalisé (risque R9).*
 
@@ -136,9 +139,9 @@ les `@verifies` des tests. Ils ne sont jamais réutilisés ni renumérotés.
 
 ## Lot 8 — Vérification
 
-- [ ] **OC-080** — Tests de conformité Ollama sur fixtures
+- [~] **OC-080** — Tests de conformité Ollama sur fixtures
       *Statut, schéma JSON, champs, types, chunks de flux, erreurs.*
-- [ ] **OC-081** — Test de la sonde `_is_served` d'`ollama-gateway`
+- [~] **OC-081** — Test de la sonde `_is_served` d'`ollama-gateway`
       *Chaque endpoint POST, corps `{}` : code ≠ 404, ou 404 contenant le mot `model` (risque R1).*
 - [~] **OC-082** — Équivalence des quatre façades
       *Le même échange conceptuel produit un `CanonicalRequest` structurellement égal.*

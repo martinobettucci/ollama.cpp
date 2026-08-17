@@ -1,7 +1,7 @@
-"""Sources de modèles : système de fichiers, Hugging Face, registre privé.
+"""Sources de modèles : Hugging Face et registre privé.
 
-@spec docs/BACKLOG.md OC-050 « /api/pull », OC-060 « Source système de fichiers »,
-      OC-061 « Source Hugging Face », OC-062 « Registre privé natif »
+@spec docs/BACKLOG.md OC-050 « /api/pull », OC-061 « Source Hugging Face »,
+      OC-062 « Registre privé natif »
 @spec docs/ollama.cpp-architecture.md §5.10 « Arborescence de données », §8 risques R8 et R9
 @spec docs/DAT.md §3.3 « Téléchargement », §7 « Sécurité »
 
@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import re
 from collections.abc import AsyncIterator
-from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 import httpx
@@ -99,19 +98,16 @@ async def _resolve(
 ) -> tuple[ModelSource, dict[str, dict[str, Any]]]:
     """Résout un nom logique vers une source et la liste de ses artefacts.
 
-    Trois formes sont reconnues :
+    Deux formes sont reconnues, toutes deux des **noms de modèles Ollama valides** :
 
-    - un chemin local existant (`/chemin/modele.gguf`) — source « file » ;
-    - `hf.co/<dépôt>` ou `huggingface.co/<dépôt>` — source « huggingface » ;
+    - `hf.co/<propriétaire>/<dépôt>` ou `huggingface.co/…` — source « huggingface » ;
     - tout autre nom, si un registre privé est configuré — source « private ».
-    """
-    candidate = Path(name).expanduser()
-    if candidate.is_file():
-        return (
-            ModelSource(type="file", reference=str(candidate)),
-            {"model": {"kind": "file", "path": candidate}},
-        )
 
+    Un chemin de fichier local n'en est délibérément pas une : ce n'est pas un nom de modèle
+    valide, et Ollama ne l'accepte pas non plus sur `/api/pull`. L'installation d'un GGUF local
+    passe par `POST /api/blobs/<digest>` puis `POST /api/create` avec `files` — le chemin natif
+    d'Ollama, déjà implémenté (OC-053, OC-054).
+    """
     lowered = name.lower()
     for prefix in _HF_PREFIXES:
         if lowered.startswith(prefix):
@@ -121,8 +117,9 @@ async def _resolve(
         return await _resolve_private(service, name)
 
     raise PullError(
-        f"cannot resolve model '{name}': provide a local GGUF path, an 'hf.co/<repo>' "
-        "reference, or configure OLLAMACPP_REGISTRY_URL"
+        f"cannot resolve model '{name}': use an 'hf.co/<owner>/<repo>' reference, configure "
+        "OLLAMACPP_REGISTRY_URL for a private registry, or install a local GGUF with "
+        "/api/blobs and /api/create"
     )
 
 
@@ -174,7 +171,7 @@ async def _resolve_huggingface(
 
     artifacts: dict[str, dict[str, Any]] = {
         "model": {"kind": "url", "url": f"{endpoint}/{repo_id}/resolve/main/{chosen}",
-                  "headers": headers, "name": Path(chosen).name}
+                  "headers": headers, "name": chosen.rsplit("/", 1)[-1]}
     }
     if projectors:
         projector = sorted(projectors)[0]
@@ -182,7 +179,7 @@ async def _resolve_huggingface(
             "kind": "url",
             "url": f"{endpoint}/{repo_id}/resolve/main/{projector}",
             "headers": headers,
-            "name": Path(projector).name,
+            "name": projector.rsplit("/", 1)[-1],
         }
 
     return ModelSource(type="huggingface", reference=repo_id), artifacts
@@ -263,15 +260,6 @@ async def _fetch_artifact(
         yield {"status": f"pulling {role}", "digest": expected,
                "total": service.registry.blobs.size(expected),
                "completed": service.registry.blobs.size(expected)}
-        return
-
-    if spec["kind"] == "file":
-        path: Path = spec["path"]
-        yield {"status": f"pulling {role}", "total": path.stat().st_size, "completed": 0}
-        info = service.registry.blobs.ingest_file(path, expected_digest=expected)
-        digests[role] = info.digest
-        yield {"status": f"pulling {role}", "digest": info.digest,
-               "total": info.size, "completed": info.size}
         return
 
     url = spec["url"]
