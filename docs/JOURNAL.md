@@ -282,3 +282,44 @@ elle n'est lue que par qui modifie l'implémentation.
 
 **Conséquence.** Le manuel et le README renvoient vers ces documents plutôt que d'en dupliquer
 des extraits, qui dériveraient.
+
+---
+
+## 2026-08-17 — Domaines à autoriser pour un `pull` réel depuis Hugging Face
+
+**Problème.** Le responsable demande quels domaines ouvrir dans la politique réseau pour qu'un
+`pull` depuis Hugging Face aboutisse réellement. Les tentatives précédentes échouaient alors que
+`huggingface.co` semblait joignable, ce qui avait été résumé à tort par « Hugging Face est
+bloqué ».
+
+**Observation.** Mesure directe, sans supposition :
+
+- `https://huggingface.co/` répond `200` ;
+- `https://us.aws.cdn.hf.co/`, `eu.aws.cdn.hf.co`, `cdn-lfs*.huggingface.co`,
+  `cas-bridge.xethub.hf.co` et `transfer.xethub.hf.co` échouent tous à la connexion ;
+- le mandataire qualifie l'échec sans ambiguïté : `connect_rejected`, « gateway answered 403 to
+  CONNECT (policy denial) », pour `us.aws.cdn.hf.co:443`.
+
+La trace de redirection d'un GGUF réel
+(`Qwen/Qwen2.5-0.5B-Instruct-GGUF/.../qwen2.5-0.5b-instruct-q4_k_m.gguf`, 491 Mo, et
+`ggml-org/models-moved/.../stories260K.gguf`, 1,19 Mo) donne la cause exacte : `huggingface.co`
+répond `302` vers `https://us.aws.cdn.hf.co/xet-bridge-us/<id>/<hash>?...&Signature=...`, avec les
+en-têtes `x-linked-size` et `x-xet-hash`. Le stockage Xet sert l'octet ; l'API ne fait
+qu'indiquer où.
+
+**Conclusion.** L'API des métadonnées et le stockage des fichiers sont deux domaines distincts.
+Une politique n'autorisant que `huggingface.co` laisse la résolution réussir puis le
+téléchargement échouer — d'où le diagnostic initial erroné. Le domaine bloquant est
+`us.aws.cdn.hf.co` ; `eu.aws.cdn.hf.co` et les hôtes `cdn-lfs*` couvrent respectivement l'autre
+région et les dépôts non migrés vers Xet. Les hôtes `*.xethub.hf.co` relèvent du client Xet
+natif, que `ollama.cpp` n'utilise pas : il télécharge en HTTP simple en suivant les redirections.
+
+**Décision.** Documenter le prérequis réseau plutôt que de le laisser dans une conversation :
+tableau des domaines et de leur nécessité dans `README.md`, renvoi depuis `.env.example` à côté
+d'`OLLAMACPP_HF_ENDPOINT`, avec une commande de vérification qui observe l'URL finale sans rien
+télécharger.
+
+**Conséquence.** Aucun changement de code : `OLLAMACPP_HF_ENDPOINT` ne désigne que l'API et le
+client suit déjà les redirections. OC-061 reste `[~]` : le chemin est couvert par des tests
+contre un serveur local qui reproduit le contrat HF, mais le `pull` contre le vrai Hugging Face
+n'a pas pu être exécuté dans cet environnement, l'hôte de stockage y étant refusé.

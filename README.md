@@ -76,6 +76,38 @@ Les versions de dépendances sont alignées sur celles d'`ollama-gateway` pour �
 - Un binaire `llama-server` accessible (compilé depuis `llama.cpp` ou fourni par l'image Docker)
 - Docker et Docker Compose pour les environnements conteneurisés
 
+### Accès réseau requis par `pull` depuis Hugging Face
+
+Autoriser `huggingface.co` **ne suffit pas**. Ce domaine ne sert que l'API de métadonnées et la
+route `/{dépôt}/resolve/{révision}/{fichier}` ; celle-ci répond **302** vers un hôte de stockage
+distinct, qui porte l'octet réel du GGUF. Une politique réseau qui n'autorise que
+`huggingface.co` laisse donc la résolution réussir puis le téléchargement échouer.
+
+Domaines à autoriser en sortie, en HTTPS (443) :
+
+| Domaine | Rôle | Nécessité |
+| --- | --- | --- |
+| `huggingface.co` | API `/api/models/{dépôt}` et redirection `/resolve/` | obligatoire |
+| `us.aws.cdn.hf.co` | stockage Xet, région US — cible effective des 302 actuels | obligatoire en pratique |
+| `eu.aws.cdn.hf.co` | stockage Xet, région EU | selon la région servie |
+| `cdn-lfs.huggingface.co`, `cdn-lfs-us-1.huggingface.co`, `cdn-lfs-eu-1.huggingface.co`, `cdn-lfs.hf.co` | anciens dépôts LFS non migrés vers Xet | recommandé |
+| `cas-bridge.xethub.hf.co`, `transfer.xethub.hf.co` | protocole Xet natif | inutile ici — `ollama.cpp` télécharge en HTTP simple |
+
+Vérifier l'ouverture réelle sans rien télécharger, en observant la redirection :
+
+```bash
+curl -sSIL -o /dev/null -w '%{http_code} %{url_effective}\n' \
+  https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf
+```
+
+Une réponse `200` sur une URL finale en `*.cdn.hf.co` prouve que la chaîne complète est ouverte.
+Un échec de connexion sur cette URL finale, alors que `huggingface.co` répond, désigne exactement
+l'hôte de stockage à autoriser.
+
+Côté `ollama.cpp`, aucune configuration supplémentaire n'est requise : `OLLAMACPP_HF_ENDPOINT`
+désigne uniquement l'API (`https://huggingface.co` par défaut), et le client suit les
+redirections. Un miroir interne se déclare en pointant cette variable vers lui.
+
 ## État du projet
 
 Les quatre façades, le registre, le cycle de vie, l'ordonnanceur et le téléchargement sont

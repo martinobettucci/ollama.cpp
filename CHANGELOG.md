@@ -69,6 +69,9 @@ Toutes les modifications notables de `ollama.cpp`.
   drapeau `llama-server` correspondant à chacun.
 - Compatibilité vérifiée avec le vrai binaire `ollama` (OC-084) : `list`, `show`, `ps`, `cp`,
   `rm` et `run` fonctionnent sans adaptation contre `ollama.cpp`.
+- Prérequis réseau d'un `pull` depuis Hugging Face documenté dans `README.md` et rappelé dans
+  `.env.example` : l'API et le stockage des fichiers sont deux domaines distincts, autoriser
+  `huggingface.co` seul laisse la résolution réussir puis le téléchargement échouer.
 
 ### Corrigé
 

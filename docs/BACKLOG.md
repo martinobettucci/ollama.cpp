@@ -117,6 +117,12 @@ les `@verifies` des tests. Ils ne sont jamais réutilisés ni renumérotés.
       pas non plus sur `/api/pull`. L'installation d'un GGUF local passe donc par le chemin natif
       `POST /api/blobs/<digest>` + `POST /api/create` (OC-053, OC-054), vérifié de bout en bout.*
 - [~] **OC-061** — Source Hugging Face
+      *`hf.co/<dépôt>[:<fichier>]`, résolution par `/api/models`, téléchargement de
+      `/resolve/<révision>/<fichier>` en suivant les redirections. Vérifié contre un serveur local
+      reproduisant le contrat HF. **Non vérifié contre le vrai Hugging Face** : l'API répond, mais
+      l'hôte de stockage des fichiers (`us.aws.cdn.hf.co`, cible des `302`) est refusé par la
+      politique réseau de cet environnement. Domaines à ouvrir : `README.md`, « Accès réseau
+      requis par `pull` depuis Hugging Face ».*
 - [~] **OC-062** — Registre privé natif
       *URL, jeton, en-tête `Authorization`, checksums, cache local, installation atomique,
       reprise de téléchargement ; aucun secret journalisé (risque R9).*
