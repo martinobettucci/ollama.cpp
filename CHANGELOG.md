@@ -72,9 +72,18 @@ Toutes les modifications notables de `ollama.cpp`.
 - Prérequis réseau d'un `pull` depuis Hugging Face documenté dans `README.md` et rappelé dans
   `.env.example` : l'API et le stockage des fichiers sont deux domaines distincts, autoriser
   `huggingface.co` seul laisse la résolution réussir puis le téléchargement échouer.
+- Vérification de bout en bout contre le **vrai Hugging Face** (OC-061) :
+  `tests/test_e2e_huggingface.py` tire `Qwen/Qwen2.5-0.5B-Instruct-GGUF:q4_k_m`, contrôle la
+  taille à l'octet près et le digest recalculé, puis charge le modèle et vérifie une réponse
+  **juste**, un appel d'outil réel et la boucle complète sur son résultat. Activé par
+  `OLLAMACPP_TEST_HF_PULL=1`.
 
 ### Corrigé
 
+- Le nombre de paramètres n'était lu que dans `general.parameter_count`, clé absente de beaucoup
+  de GGUF publiés — dont ceux de Qwen. `ollama show` affichait alors une ligne « parameters »
+  vide. Il est désormais **calculé** en additionnant les éléments de la table des tenseurs, comme
+  le fait Ollama, et écrit dans les métadonnées.
 - `/api/ps` annonçait `size_vram = size` en toutes circonstances, ce dont le CLI Ollama déduisait
   « 100% GPU » même sur un serveur calculant intégralement sur CPU. La part en VRAM est désormais
   déduite des couches réellement déportées.

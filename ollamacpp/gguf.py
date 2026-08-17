@@ -21,7 +21,9 @@ Format lu, tel que documenté dans `ggml/include/gguf.h` (révision auditée `39
 Les chaînes sont sérialisées en `uint64` de longueur suivi des octets, sans terminateur nul ;
 les booléens tiennent sur un `int8` ; les énumérations sur un `int32`.
 
-Seul l'en-tête est lu : le blob de tenseurs n'est jamais chargé en mémoire.
+Après les paires clé/valeur vient la table des tenseurs — nom, forme, type, décalage — puis le blob
+de poids. Seules les descriptions sont lues : le blob n'est jamais chargé en mémoire. Le compte de
+paramètres en est déduit et écrit dans `general.parameter_count`, comme le fait Ollama.
 """
 
 from __future__ import annotations
@@ -39,6 +41,9 @@ GGUF_MAGIC = b"GGUF"
 _MAX_KV_COUNT = 1_000_000
 _MAX_STRING_LEN = 64 * 1024 * 1024
 _MAX_ARRAY_LEN = 100_000_000
+
+#: `MaxTensorDims` de `fs/gguf/gguf.go` (Ollama) et de `ggml` : un tenseur a au plus 4 dimensions.
+_MAX_TENSOR_DIMS = 4
 
 
 class GGUFError(ValueError):
@@ -180,6 +185,13 @@ class GGUFMetadata:
 
     @property
     def parameter_count(self) -> int:
+        """Nombre de paramètres, **calculé** depuis la table des tenseurs.
+
+        `read_metadata` écrit `general.parameter_count` dans `kv` après avoir additionné les
+        éléments de chaque tenseur, exactement comme Ollama (`fs/ggml/gguf.go` l. 239-251). Lire
+        la clé revient donc à lire le calcul, y compris quand le fichier ne la portait pas —
+        c'est le cas de beaucoup de GGUF publiés, dont ceux de Qwen.
+        """
         value = self.kv.get("general.parameter_count")
         return int(value) if isinstance(value, (int, float)) else 0
 
@@ -238,6 +250,33 @@ class GGUFMetadata:
         return out
 
 
+def _read_tensor_table(stream: BinaryIO, tensor_count: int) -> int:
+    """Parcourt la table des tenseurs et renvoie le nombre total de paramètres.
+
+    Seules les **descriptions** sont lues — nom, forme, type, décalage — soit quelques dizaines
+    d'octets par tenseur ; le blob de poids qui suit n'est jamais touché. Le compte de paramètres
+    est la somme des produits des dimensions, comme `Tensor.elements()` d'Ollama
+    (`fs/ggml/ggml.go` l. 523-532).
+
+    Une table tronquée fait échouer la lecture plutôt que de renvoyer un compte partiel : un
+    compte faux serait affiché comme un fait par `ollama show`.
+    """
+    total = 0
+    for _ in range(tensor_count):
+        _read_string(stream)  # nom du tenseur, sans usage ici
+        (dimensions,) = struct.unpack("<I", _read_exactly(stream, 4))
+        if dimensions > _MAX_TENSOR_DIMS:
+            raise GGUFError(f"tenseur à {dimensions} dimensions : maximum {_MAX_TENSOR_DIMS}")
+        elements = 1
+        for _ in range(dimensions):
+            (extent,) = struct.unpack("<Q", _read_exactly(stream, 8))
+            elements *= extent
+        _read_exactly(stream, 4)  # type ggml
+        _read_exactly(stream, 8)  # décalage dans le blob
+        total += elements
+    return total
+
+
 def read_metadata(path: Path | str) -> GGUFMetadata:
     """Lit l'en-tête GGUF d'un fichier. Ne charge jamais le blob de tenseurs."""
     file_path = Path(path)
@@ -260,6 +299,10 @@ def read_metadata(path: Path | str) -> GGUFMetadata:
             key = _read_string(stream)
             (value_type,) = struct.unpack("<i", _read_exactly(stream, 4))
             kv[key] = _read_value(stream, value_type)
+
+        parameters = _read_tensor_table(stream, tensor_count)
+        if tensor_count:
+            kv["general.parameter_count"] = parameters
 
     return GGUFMetadata(
         version=version,

@@ -111,11 +111,13 @@ redirections. Un miroir interne se déclare en pointant cette variable vers lui.
 ## État du projet
 
 Les quatre façades, le registre, le cycle de vie, l'ordonnanceur et le téléchargement sont
-implémentés et couverts par 640 tests, dont des tests d'API de bout en bout et une suite de
+implémentés et couverts par 746 tests, dont des tests d'API de bout en bout et une suite de
 conformité rejouant la logique d'`ollama-gateway`.
 
 La chaîne est vérifiée de bout en bout sur un **vrai `llama-server`** compilé depuis l'upstream,
-chargeant un **vrai modèle GGUF** et générant de vrais tokens.
+avec le **vrai binaire `ollama`** comme client, et sur un **vrai modèle entraîné** —
+`Qwen/Qwen2.5-0.5B-Instruct-GGUF` téléchargé depuis Hugging Face par `/api/pull` — qui répond
+juste, appelle des outils et boucle sur leurs résultats.
 
 L'état réel, unité par unité, est tenu dans **`docs/BACKLOG.md`**, qui fait foi — une unité n'y
 passe `[x]` qu'après validation complète de sa Definition of Done.
@@ -160,6 +162,7 @@ cmake --build build --target llama-server -j"$(nproc)"
 | `pytest` | suite de tests (les tests marqués `e2e` sont ignorés sans binaire amont) |
 | `pytest -m conformance` | conformité vis-à-vis d'`ollama-gateway` uniquement |
 | `OLLAMACPP_TEST_LLAMA_SERVER=/chemin/llama-server pytest -m e2e` | bout en bout sur le vrai `llama-server` et un vrai modèle |
+| `OLLAMACPP_TEST_HF_PULL=1 … pytest tests/test_e2e_huggingface.py` | pull réel depuis Hugging Face puis inférence (≈500 Mo, réseau requis) |
 | `docker compose -f docker-compose.dev.yml down -v` | arrêt et réinitialisation des données locales |
 
 Il n'y a **pas d'étape de build** pour le service lui-même : c'est du Python pur. Le seul artefact
@@ -197,7 +200,7 @@ ollamacpp/
   registry/        registre des modèles installés
   runtime/         superviseur, capacités, cycle de vie, ordonnanceur, mémoire
   api/             façades Ollama, OpenAI, Responses, Anthropic
-tests/             unitaires, intégration, API, conformité, contrat llama-server
+tests/             unitaires, intégration, API, conformité, contrat llama-server, pull HF réel
 scripts/seed.py            données de démonstration, via les vraies API
 scripts/make_test_model.py modèle GGUF de test, réellement chargeable
 docs/
@@ -231,7 +234,15 @@ CHANGELOG.md  README.md
 - **Le modèle de test intégré produit du charabia.** `scripts/make_test_model.py` génère un vrai
   GGUF `llama` (~460 Kio) chargeable par `llama-server`, ce qui permet d'exécuter toute la suite
   de bout en bout sans télécharger de modèle. Ses poids sont aléatoires : la chaîne complète est
-  vérifiée, mais pas la **qualité** des réponses d'un modèle entraîné.
+  vérifiée, mais pas la **qualité** des réponses. C'est pourquoi `tests/test_e2e_huggingface.py`
+  existe : sur un vrai modèle entraîné tiré de Hugging Face, il vérifie que la réponse est
+  **juste**, pas seulement bien formée. Il demande un accès réseau et se déclenche avec
+  `OLLAMACPP_TEST_HF_PULL=1`.
+- **`tool_choice: "required"` n'est pas honoré par `llama-server`** sur un tour succédant à un
+  résultat d'outil : le modèle répond en texte au lieu d'appeler l'outil. Vérifié en interrogeant
+  `llama-server` **directement**, sans `ollama.cpp` dans le chemin — la limite est en amont. Une
+  boucle d'agent doit donc conduire elle-même l'enchaînement plutôt que de compter sur la
+  contrainte.
 - **`/api/pull` n'accepte pas un chemin de fichier local** : ce n'est pas un nom de modèle Ollama
   valide, et Ollama ne l'accepte pas davantage. Un GGUF local s'installe par
   `POST /api/blobs/<digest>` puis `POST /api/create`.

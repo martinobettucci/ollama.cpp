@@ -57,15 +57,34 @@ def _typed(value: Any) -> bytes:
     raise TypeError(f"type non supporté par la fabrique de test : {type(value).__name__}")
 
 
-def build_gguf(kv: dict[str, Any], *, version: int = 3, tensor_count: int = 0) -> bytes:
-    """Sérialise un en-tête GGUF complet avec les paires clé/valeur données."""
+def build_gguf(
+    kv: dict[str, Any],
+    *,
+    version: int = 3,
+    tensor_count: int | None = None,
+    tensors: list[tuple[str, list[int]]] | None = None,
+) -> bytes:
+    """Sérialise un en-tête GGUF complet : paires clé/valeur, puis table des tenseurs.
+
+    `tensors` donne le nom et la forme de chaque tenseur ; ce sont les seules données dont
+    dépend le comptage des paramètres. `tensor_count` reste réglable indépendamment pour
+    fabriquer un en-tête **incohérent** et vérifier que le lecteur le refuse.
+    """
+    entries = tensors or []
     out = bytearray(GGUF_MAGIC)
     out += struct.pack("<I", version)
-    out += struct.pack("<q", tensor_count)
+    out += struct.pack("<q", len(entries) if tensor_count is None else tensor_count)
     out += struct.pack("<q", len(kv))
     for key, value in kv.items():
         out += _string(key)
         out += _typed(value)
+    for name, shape in entries:
+        out += _string(name)
+        out += struct.pack("<I", len(shape))
+        for dimension in shape:
+            out += struct.pack("<Q", dimension)
+        out += struct.pack("<I", 0)  # kind : GGML_TYPE_F32, sans incidence sur le comptage
+        out += struct.pack("<Q", 0)  # offset dans le blob, jamais lu ici
     return bytes(out)
 
 

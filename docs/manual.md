@@ -75,6 +75,30 @@ Un fichier précis peut être choisi en le suffixant : `hf.co/<propriétaire>/<d
 Sans précision, le premier GGUF non-projecteur du dépôt est retenu, et un éventuel `mmproj` est
 associé automatiquement — le modèle devient alors capable de vision.
 
+Exemple complet, vérifié :
+
+```bash
+curl http://localhost:11434/api/pull \
+  -d '{"model":"hf.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF:q4_k_m"}'
+```
+
+**Prérequis réseau.** Autoriser `huggingface.co` ne suffit pas : la route `/resolve/` répond une
+redirection vers un hôte de stockage distinct qui porte le fichier. Si la résolution réussit mais
+que le téléchargement échoue, c'est cet hôte qui manque à la politique de sortie. La liste des
+domaines et une commande de vérification figurent dans le `README.md`, section « Accès réseau
+requis par `pull` depuis Hugging Face ».
+
+**Symptômes et causes.**
+
+| Message | Cause |
+| --- | --- |
+| `Hugging Face repository not found: <dépôt>` | dépôt inexistant, privé, ou nom mal orthographié |
+| `no file matching '<motif>' in repository` | la quantification demandée n'est pas publiée |
+| `unable to reach Hugging Face for repository` | l'API elle-même est injoignable (réseau, proxy) |
+| téléchargement interrompu après « pulling manifest » | l'hôte de stockage n'est pas autorisé en sortie |
+
+Pour un dépôt privé ou sous licence à accepter, renseigner `OLLAMACPP_HF_TOKEN`.
+
 ### 3.2 Télécharger depuis le registre privé
 
 Avec `OLLAMACPP_REGISTRY_URL` et `OLLAMACPP_REGISTRY_TOKEN` configurés :

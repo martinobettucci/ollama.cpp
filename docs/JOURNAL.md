@@ -323,3 +323,72 @@ télécharger.
 client suit déjà les redirections. OC-061 reste `[~]` : le chemin est couvert par des tests
 contre un serveur local qui reproduit le contrat HF, mais le `pull` contre le vrai Hugging Face
 n'a pas pu être exécuté dans cet environnement, l'hôte de stockage y étant refusé.
+
+---
+
+## 2026-08-17 — Pull réel depuis Hugging Face, et ce qu'un vrai modèle a révélé
+
+**Contexte.** L'hôte de stockage `us.aws.cdn.hf.co` a été autorisé dans la politique réseau. Le
+`pull` réel, jusque-là impossible, devient exécutable.
+
+**Observations.**
+
+- `POST /api/pull` sur `hf.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF:q4_k_m` aboutit en 37 s : 475
+  événements de progression, 491 400 032 octets, statut final `success`.
+- Le digest recalculé localement (`74a4da8c…`) correspond au contenu du blob, et la taille à
+  l'octet près à l'en-tête `x-linked-size` annoncé par Hugging Face.
+- Le modèle se charge et répond juste : « La capitale de la France est Paris. »
+- `capabilities` vaut `["completion", "tools"]`, issues du `/props` du modèle chargé. `vision` est
+  correctement absent : le dépôt ne publie aucun projecteur.
+- Un appel d'outil réel est émis par le modèle, puis la boucle complète — résultat renvoyé,
+  réponse finale exploitant la valeur — fonctionne.
+
+**Défaut trouvé — le compte de paramètres.** `ollama show` affichait une ligne « parameters »
+vide. Ce GGUF ne porte pas `general.parameter_count` ; seul `general.size_label` (« 630M »), une
+chaîne libre, est renseigné. La lecture d'en-tête s'arrêtait après les paires clé/valeur et ne
+lisait jamais la table des tenseurs.
+
+Vérification dans l'amont : Ollama ne lit pas cette clé, il la **calcule**. `fs/ggml/gguf.go`
+l. 239-251 additionne les éléments de chaque tenseur (`Tensor.elements()`, `fs/ggml/ggml.go`
+l. 523-532) puis écrit le résultat dans les métadonnées, écrasant la clé si elle existait.
+
+**Correction.** `read_metadata` parcourt désormais la table des tenseurs — nom, forme, type,
+décalage, soit quelques dizaines d'octets par tenseur ; le blob de poids n'est toujours jamais
+touché — et écrit `general.parameter_count`. Bornes reprises de l'amont : `MaxTensorDims = 4`, et
+une table tronquée fait échouer la lecture plutôt que de renvoyer un compte partiel, un compte
+faux étant affiché comme un fait par `ollama show`.
+
+Six tests écrits **avant** la correction, tous en échec puis tous passants. Résultat sur le vrai
+modèle : 630 167 424 paramètres, `parameter_size = "630.17M"`, et `ollama show` affiche enfin
+`parameters 630.17M`. Le contrôle croisé est le `size_label` de 630M déclaré indépendamment par
+l'éditeur.
+
+**Équivalence des quatre façades (§35), mesurée sur le vrai modèle.** Le même échange
+— question, appel d'outil, résultat d'outil, réponse — joué sur les quatre façades donne, à
+`temperature: 0`, **la même phrase caractère pour caractère**. Les charges utiles sérialisées vers
+`llama-server` sont identiques entre OpenAI Chat, Responses et Anthropic ; la façade Ollama n'en
+diffère que par l'identifiant d'appel, que son protocole ne transporte pas.
+
+Une première mesure, à température par défaut, donnait une réponse divergente sur la façade
+Responses. La comparaison des charges utiles sérialisées a montré qu'elles étaient identiques :
+la divergence venait de l'échantillonnage, pas du code. Consigné parce qu'une conclusion hâtive
+aurait fait chercher un défaut inexistant.
+
+**Dix appels d'outils successifs (§36).** Deux limites, toutes deux hors du périmètre de
+`ollama.cpp`, mesurées séparément :
+
+1. le modèle de 0,5 milliard de paramètres abandonne la boucle après un appel et conclut en
+   texte ;
+2. `llama-server` ignore `tool_choice: "required"` sur un tour succédant à un résultat d'outil —
+   vérifié en l'interrogeant **directement**, sans `ollama.cpp` dans le chemin.
+
+Ce qui relève d'`ollama.cpp` a donc été vérifié pour lui-même : une conversation portant dix
+appels et dix résultats traverse les quatre façades, produit 702 jetons de prompt **identiques**
+sur les quatre, et le prompt rendu par `/apply-template` contient les dix blocs `<tool_call>`, les
+dix `<tool_response>`, et le témoin posé au premier tour. Rien n'est tronqué, aucun résultat
+d'outil n'est requalifié en instruction utilisateur.
+
+**Conséquence.** OC-061 passe `[x]`, couvert par `tests/test_e2e_huggingface.py` (13 tests, réseau
+requis, activés par `OLLAMACPP_TEST_HF_PULL=1`). La limite « le modèle de test produit du
+charabia » du README est désormais compensée : un vrai modèle entraîné vérifie la justesse des
+réponses. La limite `tool_choice` de `llama-server` est ajoutée aux limites connues.

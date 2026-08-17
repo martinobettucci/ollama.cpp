@@ -171,3 +171,73 @@ class TestHumanNumber:
     def test_formats_dollama(self, valeur, attendu):
         """Seuils et décimales repris de `format.HumanNumber` (`format/format.go`)."""
         assert human_number(valeur) == attendu
+
+
+class TestComptageDesParametres:
+    """Le compte de paramètres est **calculé**, comme le fait Ollama (`fs/ggml/gguf.go` l. 239-251).
+
+    Défaut trouvé sur un vrai modèle : `Qwen/Qwen2.5-0.5B-Instruct-GGUF` ne porte aucune clé
+    `general.parameter_count`. Beaucoup de GGUF publiés n'en portent pas — seul `general.size_label`
+    est renseigné, et c'est une chaîne libre. S'en remettre à la clé donnait donc
+    `details.parameter_size = ""` et l'absence de `general.parameter_count` dans
+    `/api/show.model_info`, là où Ollama expose toujours les deux : Ollama additionne les éléments
+    de chaque tenseur de la table, puis **écrit** le résultat dans les métadonnées.
+    """
+
+    def test_compte_calcule_depuis_la_table_des_tenseurs(self, tmp_path):
+        """Sans la clé, le compte vient des formes déclarées : 100×10 + 100 = 1100."""
+        kv = {k: v for k, v in DEFAULT_KV.items() if k != "general.parameter_count"}
+        chemin = tmp_path / "sans-cle.gguf"
+        chemin.write_bytes(build_gguf(
+            kv, tensors=[("token_embd.weight", [100, 10]), ("output_norm.weight", [100])]
+        ))
+        meta = read_metadata(chemin)
+        assert meta.parameter_count == 1100
+        assert meta.tensor_count == 2
+
+    def test_le_compte_calcule_est_expose_dans_model_info(self, tmp_path):
+        """`/api/show.model_info` doit porter la clé même quand le fichier ne la contient pas."""
+        kv = {k: v for k, v in DEFAULT_KV.items() if k != "general.parameter_count"}
+        chemin = tmp_path / "expose.gguf"
+        chemin.write_bytes(build_gguf(kv, tensors=[("blk.0.attn_q.weight", [896, 896])]))
+        assert read_metadata(chemin).public_model_info()["general.parameter_count"] == 802816
+
+    def test_le_calcul_prime_sur_une_cle_mensongere(self, tmp_path):
+        """Ollama écrase la clé par le calcul : la table des tenseurs est la vérité observable."""
+        kv = dict(DEFAULT_KV)
+        kv["general.parameter_count"] = 999_999_999_999
+        chemin = tmp_path / "mensongere.gguf"
+        chemin.write_bytes(build_gguf(kv, tensors=[("token_embd.weight", [10, 10])]))
+        assert read_metadata(chemin).parameter_count == 100
+
+    def test_taille_lisible_derivee_du_calcul(self, tmp_path):
+        """630 millions de paramètres comptés → `630M`, comme l'afficherait `ollama show`."""
+        kv = {k: v for k, v in DEFAULT_KV.items() if k != "general.parameter_count"}
+        chemin = tmp_path / "lisible.gguf"
+        chemin.write_bytes(build_gguf(kv, tensors=[("token_embd.weight", [630_000_000])]))
+        assert read_metadata(chemin).parameter_size == "630M"
+
+    def test_sans_tenseur_ni_cle_le_compte_reste_nul(self, tmp_path):
+        """Un `mmproj` ou un en-tête nu ne doit pas inventer un compte."""
+        kv = {k: v for k, v in DEFAULT_KV.items() if k != "general.parameter_count"}
+        chemin = tmp_path / "nu.gguf"
+        chemin.write_bytes(build_gguf(kv))
+        meta = read_metadata(chemin)
+        assert meta.parameter_count == 0
+        assert meta.parameter_size == ""
+
+    def test_table_tronquee_refusee(self, tmp_path):
+        """En-tête annonçant plus de tenseurs qu'il n'en contient : erreur, pas de compte partiel."""
+        chemin = tmp_path / "tronquee.gguf"
+        chemin.write_bytes(build_gguf(
+            DEFAULT_KV, tensor_count=5, tensors=[("token_embd.weight", [10, 10])]
+        ))
+        with pytest.raises(GGUFError):
+            read_metadata(chemin)
+
+    def test_dimensions_excessives_refusees(self, tmp_path):
+        """`MaxTensorDims = 4` (`fs/gguf/gguf.go`) : au-delà, le fichier est malformé."""
+        chemin = tmp_path / "dims.gguf"
+        chemin.write_bytes(build_gguf(DEFAULT_KV, tensors=[("t", [2, 2, 2, 2, 2])]))
+        with pytest.raises(GGUFError):
+            read_metadata(chemin)

@@ -53,7 +53,11 @@ les `@verifies` des tests. Ils ne sont jamais réutilisés ni renumérotés.
       *Résolution de nom, `list`, `get`, `install`, `copy`, `delete`, `size` et `digest` réels
       (risque R4).*
 - [~] **OC-023** — Métadonnées GGUF
-      *Lecture de l'en-tête GGUF : architecture, quantisation, contexte, taille de paramètres.*
+      *Lecture de l'en-tête GGUF : architecture, quantisation, contexte, taille de paramètres.
+      Le compte de paramètres est **calculé** depuis la table des tenseurs, comme Ollama
+      (`fs/ggml/gguf.go` l. 239-251) : beaucoup de GGUF publiés, dont ceux de Qwen, ne portent pas
+      `general.parameter_count`. Vérifié sur un vrai modèle : 630 167 424 paramètres comptés,
+      recoupés par le `general.size_label` de 630M déclaré indépendamment par l'éditeur.*
 
 ## Lot 3 — Runtime
 
@@ -116,13 +120,14 @@ les `@verifies` des tests. Ils ne sont jamais réutilisés ni renumérotés.
       *Décision : un chemin local n'est pas un nom de modèle Ollama valide et Ollama ne l'accepte
       pas non plus sur `/api/pull`. L'installation d'un GGUF local passe donc par le chemin natif
       `POST /api/blobs/<digest>` + `POST /api/create` (OC-053, OC-054), vérifié de bout en bout.*
-- [~] **OC-061** — Source Hugging Face
+- [x] **OC-061** — Source Hugging Face
       *`hf.co/<dépôt>[:<fichier>]`, résolution par `/api/models`, téléchargement de
-      `/resolve/<révision>/<fichier>` en suivant les redirections. Vérifié contre un serveur local
-      reproduisant le contrat HF. **Non vérifié contre le vrai Hugging Face** : l'API répond, mais
-      l'hôte de stockage des fichiers (`us.aws.cdn.hf.co`, cible des `302`) est refusé par la
-      politique réseau de cet environnement. Domaines à ouvrir : `README.md`, « Accès réseau
-      requis par `pull` depuis Hugging Face ».*
+      `/resolve/<révision>/<fichier>` en suivant la redirection vers l'hôte de stockage.
+      **Vérifié contre le vrai Hugging Face** (`tests/test_e2e_huggingface.py`, 13 tests) :
+      `Qwen/Qwen2.5-0.5B-Instruct-GGUF:q4_k_m` tiré en 37 s, 491 400 032 octets conformes à
+      `x-linked-size`, digest recalculé localement, source tracée au manifest, puis chargement,
+      génération juste, appel d'outil et boucle complète sur le modèle obtenu. Dépôt et fichier
+      inexistants refusés. Prérequis réseau documenté et mesuré par un test dédié.*
 - [~] **OC-062** — Registre privé natif
       *URL, jeton, en-tête `Authorization`, checksums, cache local, installation atomique,
       reprise de téléchargement ; aucun secret journalisé (risque R9).*
