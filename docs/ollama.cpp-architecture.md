@@ -1,9 +1,9 @@
 # Architecture de `ollama.cpp`
 
 > Document d'architecture fondateur, exigé avant toute implémentation.
-> Statut : **audit terminé, architecture arrêtée, implémentation non commencée** à la rédaction
-> initiale de ce document. Les sections « Plan d'implémentation » et « Risques » sont vivantes et
-> mises à jour au fil des chunks.
+> Statut : **architecture arrêtée et implémentée**. Le §7 donne l'état d'avancement réel étape
+> par étape ; `docs/BACKLOG.md` fait foi unité par unité. Les sections « Plan d'implémentation »
+> et « Risques » sont vivantes et mises à jour au fil des chunks.
 >
 > Toutes les affirmations sur `llama.cpp`, `ollama` et `ollama-gateway` de ce document ont été
 > vérifiées par lecture directe des dépôts aux révisions indiquées au §0. Ce sont des **faits
@@ -737,23 +737,30 @@ correction des régressions, commit et push.
 | 3 | Audit d'`ollama-gateway` | fait |
 | 4 | Matrice de compatibilité | fait (§3.2) |
 | 5 | Documentation socle (ce document, DAT, backlog, journal) | fait |
-| 6 | Configuration centralisée, erreurs, nommage | à faire |
-| 7 | Représentation canonique | à faire |
-| 8 | `BlobStore`, manifests, `ModelRegistry` | à faire |
-| 9 | `LlamaServerSupervisor` | à faire |
-| 10 | `ModelLifecycleManager` + single-flight | à faire |
-| 11 | `ModelScheduler` + `keep_alive` | à faire |
-| 12 | Détection de capacités | à faire |
-| 13 | Ollama `/api/tags`, `/api/show`, `/api/ps`, `/api/version` | à faire |
-| 14 | Ollama `/api/chat`, `/api/generate`, `/api/embed`, `/api/embeddings` | à faire |
-| 15 | Ollama `/api/pull`, `/api/create`, `/api/copy`, `/api/delete`, `/api/blobs` | à faire |
-| 16 | Registre privé, sources Hugging Face et fichiers | à faire |
-| 17 | OpenAI Chat Completions, Completions, Embeddings, Models | à faire |
-| 18 | OpenAI Responses | à faire |
-| 19 | Anthropic Messages, `count_tokens` | à faire |
-| 20 | Vision, thinking | à faire |
-| 21 | Tests de conformité complets | à faire |
-| 22 | Conteneurisation, `runDev` / `runStaging` / `runProd` | à faire |
+| 6 | Configuration centralisée, erreurs, nommage | fait, tests unitaires |
+| 7 | Représentation canonique | fait, tests unitaires et d'équivalence |
+| 8 | `BlobStore`, manifests, `ModelRegistry` | fait, tests unitaires |
+| 9 | `LlamaServerSupervisor` | fait, tests d'intégration sur processus réels |
+| 10 | `ModelLifecycleManager` + single-flight | fait, tests d'intégration |
+| 11 | `ModelScheduler` + `keep_alive` | fait, tests unitaires et d'intégration |
+| 12 | Détection de capacités | fait, tests d'intégration |
+| 13 | Ollama `/api/tags`, `/api/show`, `/api/ps`, `/api/version` | fait, tests d'API |
+| 14 | Ollama `/api/chat`, `/api/generate`, `/api/embed`, `/api/embeddings` | fait, tests d'API |
+| 15 | Ollama `/api/pull`, `/api/create`, `/api/copy`, `/api/delete`, `/api/blobs` | fait, tests d'API |
+| 16 | Registre privé, source Hugging Face | fait, tests sur registres HTTP réels |
+| 17 | OpenAI Chat Completions, Completions, Embeddings, Models | fait, tests d'API |
+| 18 | OpenAI Responses | fait, tests d'API et d'équivalence |
+| 19 | Anthropic Messages, `count_tokens` | fait, tests d'API |
+| 20 | Vision, thinking | fait, tests d'intégration |
+| 21 | Tests de conformité | fait : conformité `ollama-gateway`, équivalence des 4 façades, multi-tours ≥ 10 |
+| 22 | Conteneurisation, `runDev` / `runStaging` / `runProd` | fait |
+
+**Reste non vérifié** : l'inférence sur un vrai modèle GGUF (OC-085). Le binaire `llama-server` a
+été compilé depuis l'upstream et son contrat vérifié — toute ligne de commande produite par le
+middleware est acceptée, `/health` et `/v1/models` répondent conformément sur une instance
+réellement démarrée — mais la politique réseau de l'environnement de construction bloque le
+téléchargement de modèles, si bien qu'aucun GGUF réel n'a pu être chargé. Le reste de la chaîne
+est couvert par un faux `llama-server` implémentant le contrat HTTP amont.
 
 Le suivi fin, unité par unité, vit dans `docs/BACKLOG.md`, qui fait foi.
 
