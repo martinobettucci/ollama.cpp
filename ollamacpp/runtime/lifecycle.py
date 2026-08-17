@@ -89,6 +89,12 @@ class Resident:
     context_length: int = 0
     loaded_at: float = 0.0
 
+    #: Configuration runtime effective ayant servi à lancer l'instance. Conservée pour détecter
+    #: qu'une requête ultérieure demande une configuration différente (`options.num_ctx`), ce qui
+    #: impose un rechargement — c'est la sémantique d'Ollama, où `num_ctx` est une option de
+    #: *runner*, appliquée au chargement et non à la génération.
+    runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
+
     @property
     def name(self) -> str:
         return self.ref.display_shortest()
@@ -164,26 +170,54 @@ class ModelLifecycleManager:
 
     # --- Chargement --------------------------------------------------------------------------
 
-    async def ensure_ready(self, name: str, keep_alive: KeepAlive | None = None) -> Resident:
+    async def ensure_ready(
+        self,
+        name: str,
+        keep_alive: KeepAlive | None = None,
+        runtime_override: RuntimeConfig | None = None,
+    ) -> Resident:
         """Garantit qu'un modèle est chargé et prêt, en un seul chargement partagé.
+
+        `runtime_override` porte les options qui configurent l'**instance** et non la génération
+        — au premier chef `options.num_ctx`, qu'`ollama-gateway` injecte pour plafonner le
+        contexte d'une clé (risque R2). Si le modèle est déjà résident avec une configuration
+        différente, il est **rechargé** : c'est la sémantique d'Ollama, où ces options sont des
+        options de *runner*. Sans ce rechargement, le plafond de la passerelle serait
+        silencieusement sans effet.
 
         Lève `ModelNotFound` si le modèle n'est pas installé, `UpstreamError` s'il ne peut pas
         être chargé. Ne renvoie jamais un modèle en cours de chargement.
         """
         model = self._registry.get(name)  # lève ModelNotFound si absent
         key = model.ref.display_shortest()
+        wanted = self._effective_runtime(model, runtime_override)
 
         while True:
             resident = self._residents.get(key)
             if resident is not None and resident.is_serving:
-                self._touch(resident, keep_alive)
-                return resident
+                if resident.runtime == wanted:
+                    self._touch(resident, keep_alive)
+                    return resident
+                if resident.active_requests > 0:
+                    # Recharger sous une requête en cours la tuerait. On sert la requête avec la
+                    # configuration en place et on le signale : c'est visible, jamais silencieux.
+                    emit(
+                        EVENT_FAILURE,
+                        model=key,
+                        reason="runtime_override_ignored_while_busy",
+                        active=resident.active_requests,
+                    )
+                    self._touch(resident, keep_alive)
+                    return resident
+                emit(EVENT_UNLOAD, model=key, reason="runtime_override_changed")
+                await self._unload_key(key)
+                continue
 
             task = self._loading.get(key)
             if task is None:
                 emit(EVENT_LOAD_REQUESTED, model=key, keep_alive=str(
                     keep_alive or self._effective_keep_alive(model, None)))
-                task = asyncio.create_task(self._load(model, keep_alive))
+                task = asyncio.create_task(self._load(model, keep_alive, wanted))
                 self._loading[key] = task
                 task.add_done_callback(lambda _t, k=key: self._loading.pop(k, None))
 
@@ -194,7 +228,18 @@ class ModelLifecycleManager:
             self._touch(resident, keep_alive)
             return resident
 
-    async def _load(self, model: RegisteredModel, keep_alive: KeepAlive | None) -> Resident:
+    def _effective_runtime(
+        self, model: RegisteredModel, override: RuntimeConfig | None
+    ) -> RuntimeConfig:
+        """Applique la précédence `requête > manifest` sur la configuration runtime (§5.6)."""
+        return build_runtime_config(model.manifest.runtime, override)
+
+    async def _load(
+        self,
+        model: RegisteredModel,
+        keep_alive: KeepAlive | None,
+        runtime: RuntimeConfig | None = None,
+    ) -> Resident:
         """Charge effectivement un modèle : admission, éviction, démarrage, détection."""
         key = model.ref.display_shortest()
 
@@ -204,7 +249,7 @@ class ModelLifecycleManager:
             emit(EVENT_FAILURE, model=key, reason="missing_artifacts", artifacts=missing)
             raise UpstreamError(f"model '{key}' is missing required artifacts")
 
-        runtime = model.manifest.runtime
+        runtime = runtime if runtime is not None else model.manifest.runtime
         effective_context = context_length(None, model.metadata, self._config.default_context)
         if runtime.context:
             effective_context = runtime.context
@@ -244,6 +289,7 @@ class ModelLifecycleManager:
                 keep_alive=resolved_keep_alive,
                 priority=priority,
                 last_used=self._clock(),
+                runtime=runtime,
             )
             self._residents[key] = placeholder
 
@@ -298,14 +344,19 @@ class ModelLifecycleManager:
     # --- Usage --------------------------------------------------------------------------------
 
     @contextlib.asynccontextmanager
-    async def acquire(self, name: str, keep_alive: KeepAlive | None = None) -> AsyncIterator[Resident]:
+    async def acquire(
+        self,
+        name: str,
+        keep_alive: KeepAlive | None = None,
+        runtime_override: RuntimeConfig | None = None,
+    ) -> AsyncIterator[Resident]:
         """Réserve un modèle pour la durée d'une requête.
 
         Le modèle passe `BUSY` pendant l'exécution — donc inévinçable — puis `IDLE`. Le
         `try/finally` est essentiel : sans lui, une requête interrompue laisserait le modèle
         éternellement BUSY, donc jamais déchargeable.
         """
-        resident = await self.ensure_ready(name, keep_alive)
+        resident = await self.ensure_ready(name, keep_alive, runtime_override)
         resident.active_requests += 1
         resident.state = ModelState.BUSY
         emit(EVENT_REQUEST_ASSIGNED, model=resident.name, active=resident.active_requests)

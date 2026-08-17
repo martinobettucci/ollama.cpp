@@ -33,6 +33,15 @@ Toutes les modifications notables de `ollama.cpp`.
   toucher à un modèle occupé ; journal de décisions explicable.
 - Faux `llama-server` exécutable pour les tests d'intégration : vrai processus, vrai port, vrai
   HTTP, vrais signaux — seule l'inférence est déterministe.
+- Façade Ollama native (OC-040 à OC-047, OC-051 à OC-055) : `/`, `/api/version`, `/api/status`,
+  `/api/tags`, `/api/show`, `/api/ps`, `/api/chat`, `/api/generate`, `/api/embed`,
+  `/api/embeddings`, `/api/copy`, `/api/delete`, `/api/blobs`, `/api/create`, avec streaming
+  NDJSON, durées en nanosecondes, `done_reason` et sémantique `keep_alive` complète.
+- Pont canonique vers `llama-server` : sérialiseur backend unique partagé par les quatre
+  façades, avec correspondance vérifiée du raisonnement, des formats de réponse structurée et
+  des mesures.
+- Application ASGI assemblant les quatre façades sur un registre et un runtime uniques, avec
+  verrou du plan de contrôle et clé d'accès optionnelle appliqués côté serveur.
 
 ## [Publié]
 

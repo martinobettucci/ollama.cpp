@@ -42,9 +42,11 @@ def config(tmp_path) -> Config:
         load_timeout_s=20.0,
         request_timeout_s=20.0,
         max_loaded_models=2,
-        # Budget nul = mesure indisponible : seule la limite de nombre de modèles s'applique.
-        # Les tests de pression mémoire posent explicitement leur propre budget.
-        memory_limit_bytes=0,
+        # Budget explicite et marge nulle : les décisions du scheduler ne doivent pas dépendre de
+        # la RAM de la machine de test, sinon la suite passerait ou échouerait selon l'hôte.
+        # Les tests de pression mémoire posent leur propre budget.
+        memory_limit_bytes=64 * 1024 ** 3,
+        memory_safety_margin=0.0,
         default_context=4096,
     )
 
@@ -127,3 +129,29 @@ def fake_server_env(monkeypatch):
     for name in ("FAKE_LLAMA_EXIT_CODE", "FAKE_LLAMA_START_DELAY", "FAKE_LLAMA_VISION",
                  "FAKE_LLAMA_TOOLS", "FAKE_LLAMA_THINKING"):
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture
+def client(config):
+    """Client HTTP sur l'application complète, adossée au faux `llama-server`.
+
+    Le cycle de vie ASGI est exécuté : le service démarre réellement, lance de vrais processus à
+    la demande, et les arrête à la fermeture. Ce sont donc des tests d'API de bout en bout, pas
+    des appels de fonctions.
+    """
+    import warnings
+
+    from fastapi.testclient import TestClient
+
+    from ollamacpp.app import create_app
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with TestClient(create_app(config)) as test_client:
+            yield test_client
+
+
+@pytest.fixture
+def installed(client, config):
+    """Registre du service démarré, pour installer des modèles vus par l'application."""
+    return client.app.state.service.registry

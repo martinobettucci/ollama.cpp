@@ -77,23 +77,23 @@ les `@verifies` des tests. Ils ne sont jamais réutilisés ni renumérotés.
 
 ## Lot 4 — Façade Ollama
 
-- [ ] **OC-040** — `GET /api/version`, `GET /`, `GET /api/status`
-- [ ] **OC-041** — `GET /api/tags`
+- [~] **OC-040** — `GET /api/version`, `GET /`, `GET /api/status`
+- [~] **OC-041** — `GET /api/tags`
       *`models[].name` **et** `models[].model`, `size` et `digest` réels, `details`,
       `capabilities` (criticité P0 de la matrice).*
-- [ ] **OC-042** — `POST /api/show`
+- [~] **OC-042** — `POST /api/show`
       *`details`, `model_info`, `template`, `system`, `parameters`, `capabilities`, `modified_at`.*
-- [ ] **OC-043** — `GET /api/ps`
+- [~] **OC-043** — `GET /api/ps`
       *État réel du lifecycle : `expires_at`, `size_vram`, `context_length`. Jamais simulé.*
-- [ ] **OC-044** — `POST /api/chat`
+- [~] **OC-044** — `POST /api/chat`
       *Messages, tools, tool results, images, `format`, `options`, `stream` NDJSON, `keep_alive`,
       `think`, `done_reason`, métriques.*
-- [ ] **OC-045** — `POST /api/generate`
+- [~] **OC-045** — `POST /api/generate`
       *`prompt`, `system`, `template`, `raw`, `format`, `options`, `stream`, `keep_alive`,
       `images`, `think`, `context`.*
-- [ ] **OC-046** — `POST /api/embed` et `POST /api/embeddings`
+- [~] **OC-046** — `POST /api/embed` et `POST /api/embeddings`
       *Formes plurielle et legacy singulière.*
-- [ ] **OC-047** — `options.num_ctx` honoré sur les 4 chemins natifs
+- [~] **OC-047** — `options.num_ctx` honoré sur les 4 chemins natifs
       *Contrainte dure d'`ollama-gateway` (risque R2).*
 
 ## Lot 5 — Plan de contrôle
@@ -101,12 +101,12 @@ les `@verifies` des tests. Ils ne sont jamais réutilisés ni renumérotés.
 - [ ] **OC-050** — `POST /api/pull`
       *Flux de progression NDJSON, statut final `success`, mode `stream:false` attendu par la
       console d'administration d'`ollama-gateway`.*
-- [ ] **OC-051** — `DELETE /api/delete`
-- [ ] **OC-052** — `POST /api/copy`
-- [ ] **OC-053** — `POST /api/create`
+- [~] **OC-051** — `DELETE /api/delete`
+- [~] **OC-052** — `POST /api/copy`
+- [~] **OC-053** — `POST /api/create`
       *Sous-ensemble : `from`, `files`, `template`, `system`, `parameters`, `license`.*
-- [ ] **OC-054** — `POST` et `HEAD /api/blobs/:digest`
-- [ ] **OC-055** — Endpoints hors périmètre explicites
+- [~] **OC-054** — `POST` et `HEAD /api/blobs/:digest`
+- [~] **OC-055** — Endpoints hors périmètre explicites
       *`/api/push` et les endpoints cloud répondent un code et un message clairs, jamais un 404
       de routeur.*
 

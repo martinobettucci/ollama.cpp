@@ -78,6 +78,11 @@ DEFAULT_KV: dict[str, Any] = {
     "qwen3.context_length": 32768,
     "qwen3.embedding_length": 4096,
     "qwen3.block_count": 36,
+    # Grouped-query attention, comme tous les modèles de cette génération : 32 têtes d'attention
+    # pour 8 têtes KV. Sans ces clés, l'estimation du cache KV vaudrait 19,3 Gio pour ce modèle
+    # au lieu de 4,8 Gio — l'écart d'un facteur 4 que corrige `estimate_kv_bytes` (risque R6).
+    "qwen3.attention.head_count": 32,
+    "qwen3.attention.head_count_kv": 8,
     "tokenizer.chat_template": "{% for m in messages %}{{ m.content }}{% endfor %}",
     "tokenizer.ggml.tokens": ["<s>", "</s>", "a", "b", "c"],
 }
