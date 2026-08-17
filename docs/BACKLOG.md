@@ -27,18 +27,18 @@ les `@verifies` des tests. Ils ne sont jamais réutilisés ni renumérotés.
 
 ## Lot 1 — Noyau
 
-- [ ] **OC-010** — Configuration centralisée
+- [~] **OC-010** — Configuration centralisée
       *Variables documentées, valeurs par défaut, validation au démarrage, aucun secret en dur.*
-- [ ] **OC-011** — Schéma d'erreur compatible Ollama
+- [~] **OC-011** — Schéma d'erreur compatible Ollama
       *`{"error": "..."}` sur toutes les façades ; jamais de 404 de routeur ni de 422 FastAPI sur
       un endpoint servi (risque R1).*
-- [ ] **OC-012** — Nommage des modèles
+- [~] **OC-012** — Nommage des modèles
       *`[host/][namespace/]model[:tag]`, tag par défaut `latest`, namespace par défaut `library`,
       omission des valeurs par défaut à l'affichage.*
-- [ ] **OC-013** — Durées et `keep_alive`
+- [~] **OC-013** — Durées et `keep_alive`
       *Nanosecondes en sortie ; entrée : absent = 5 m, nombre = secondes, négatif = infini,
       chaîne = durée Go, `0` = déchargement (risques R3, R5).*
-- [ ] **OC-014** — Représentation conversationnelle canonique
+- [~] **OC-014** — Représentation conversationnelle canonique
       *Messages, tool calls, tool results, images, blocs de raisonnement ; invariants
       `docs/ollama.cpp-architecture.md` §5.4.*
 

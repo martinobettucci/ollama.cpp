@@ -67,3 +67,16 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# --- Python (service ollama.cpp) ---
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+.coverage
+htmlcov/
+
+# --- Données locales de modèles (jamais versionnées : blobs GGUF volumineux) ---
+/models/
