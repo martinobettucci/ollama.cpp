@@ -41,6 +41,7 @@ from ..canonical import (
     ToolCall,
     ToolResultMessage,
     UserMessage,
+    link_tool_results,
 )
 from ..errors import BadRequest
 from .common import get_service, read_body
@@ -152,7 +153,7 @@ def parse_input(raw: Any, instructions: str | None) -> tuple[CanonicalMessage, .
             raise BadRequest(f"unsupported input item type: {kind}")
 
     flush()
-    return tuple(messages)
+    return link_tool_results(tuple(messages))
 
 
 def build_request(body: dict[str, Any], ref) -> CanonicalRequest:

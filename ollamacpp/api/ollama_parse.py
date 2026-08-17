@@ -41,6 +41,7 @@ from ..canonical import (
     ToolDefinition,
     ToolResultMessage,
     UserMessage,
+    link_tool_results,
 )
 from ..durations import DurationError, KeepAlive, parse_keep_alive
 from ..errors import BadRequest
@@ -266,7 +267,7 @@ def parse_chat_request(body: dict[str, Any], ref: ModelRef) -> CanonicalRequest:
 
     return CanonicalRequest(
         model=ref,
-        messages=tuple(parse_message(item) for item in raw_messages),
+        messages=link_tool_results(tuple(parse_message(item) for item in raw_messages)),
         tools=parse_tools(body.get("tools")),
         options=parse_options(body.get("options")),
         response_format=parse_format(body.get("format")),

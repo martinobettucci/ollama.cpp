@@ -47,6 +47,7 @@ from ..canonical import (
     ToolDefinition,
     ToolResultMessage,
     UserMessage,
+    link_tool_results,
 )
 from ..errors import BadRequest
 from ..runtime.capabilities import detect
@@ -108,7 +109,11 @@ def parse_content(raw: Any) -> tuple[TextBlock | ImageInput, ...]:
         if not isinstance(item, dict):
             raise BadRequest("each content part must be an object")
         kind = item.get("type")
-        if kind == "text":
+        # Trois noms pour du texte selon l'endpoint : `text` en Chat Completions, `input_text` et
+        # `output_text` en Responses. Omettre `output_text` faisait disparaître silencieusement
+        # le dernier message assistant d'une conversation Responses — donc tout le contexte d'un
+        # tour précédent.
+        if kind in ("text", "input_text", "output_text"):
             text = item.get("text")
             if isinstance(text, str) and text:
                 parts.append(TextBlock(text=text))
@@ -316,7 +321,7 @@ def _parse_openai_tool_calls(raw: Any) -> tuple[ToolCall, ...]:
 def build_chat_request(body: dict[str, Any], ref) -> CanonicalRequest:
     return CanonicalRequest(
         model=ref,
-        messages=parse_chat_messages(body.get("messages")),
+        messages=link_tool_results(parse_chat_messages(body.get("messages"))),
         tools=parse_tools(body.get("tools")),
         tool_choice=parse_tool_choice(body.get("tool_choice")),
         options=parse_sampling(body),

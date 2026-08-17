@@ -42,6 +42,15 @@ Toutes les modifications notables de `ollama.cpp`.
   des mesures.
 - Application ASGI assemblant les quatre façades sur un registre et un runtime uniques, avec
   verrou du plan de contrôle et clé d'accès optionnelle appliqués côté serveur.
+- Façades OpenAI et Anthropic (OC-070 à OC-076) : `/v1/models`, `/v1/chat/completions`,
+  `/v1/completions`, `/v1/embeddings`, `/v1/responses`, `/v1/messages` et
+  `/v1/messages/count_tokens`, chacune convertissant directement vers la représentation
+  canonique, avec leurs formats de streaming propres (SSE OpenAI, événements nommés Anthropic
+  et Responses).
+- Corrélation du nom d'outil : un résultat d'outil sans nom explicite — cas d'Anthropic, dont le
+  bloc `tool_result` ne porte que `tool_use_id` — retrouve son nom depuis l'appel corrélé.
+- Tests d'équivalence des quatre façades (OC-082) et de boucles de douze appels d'outils
+  successifs (OC-083).
 
 ## [Publié]
 

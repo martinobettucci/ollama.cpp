@@ -18,6 +18,7 @@ from .messages import (
     ToolCall,
     ToolResultMessage,
     UserMessage,
+    link_tool_results,
 )
 from .request import (
     CanonicalRequest,
@@ -59,4 +60,5 @@ __all__ = [
     "ToolResultMessage",
     "Usage",
     "UserMessage",
+    "link_tool_results",
 ]

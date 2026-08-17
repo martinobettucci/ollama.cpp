@@ -120,19 +120,19 @@ les `@verifies` des tests. Ils ne sont jamais réutilisés ni renumérotés.
 
 ## Lot 7 — Façades OpenAI et Anthropic
 
-- [ ] **OC-070** — `GET /v1/models` et `GET /v1/models/:model`
+- [~] **OC-070** — `GET /v1/models` et `GET /v1/models/:model`
       *`data[].id` (contrainte de filtrage d'`ollama-gateway`).*
-- [ ] **OC-071** — `POST /v1/chat/completions`
+- [~] **OC-071** — `POST /v1/chat/completions`
       *Streaming SSE, tools, `tool_choice`, vision, `response_format`, `usage`.*
-- [ ] **OC-072** — `POST /v1/completions`
-- [ ] **OC-073** — `POST /v1/embeddings`
-- [ ] **OC-074** — `POST /v1/responses`
+- [~] **OC-072** — `POST /v1/completions`
+- [~] **OC-073** — `POST /v1/embeddings`
+- [~] **OC-074** — `POST /v1/responses`
       *`input`/`output`, `reasoning`, `function_call`, `function_call_output`, `call_id`, `tools`,
       événements de streaming, `usage`. Un `function_call_output` ne devient jamais un message
       `user` (risque R7).*
-- [ ] **OC-075** — `POST /v1/messages`
+- [~] **OC-075** — `POST /v1/messages`
       *Blocs de contenu, `tool_use`, `tool_result`, images, `max_tokens`, streaming, `usage`.*
-- [ ] **OC-076** — `POST /v1/messages/count_tokens`
+- [~] **OC-076** — `POST /v1/messages/count_tokens`
 
 ## Lot 8 — Vérification
 
@@ -140,9 +140,9 @@ les `@verifies` des tests. Ils ne sont jamais réutilisés ni renumérotés.
       *Statut, schéma JSON, champs, types, chunks de flux, erreurs.*
 - [ ] **OC-081** — Test de la sonde `_is_served` d'`ollama-gateway`
       *Chaque endpoint POST, corps `{}` : code ≠ 404, ou 404 contenant le mot `model` (risque R1).*
-- [ ] **OC-082** — Équivalence des quatre façades
+- [~] **OC-082** — Équivalence des quatre façades
       *Le même échange conceptuel produit un `CanonicalRequest` structurellement égal.*
-- [ ] **OC-083** — Multi-tours ≥ 10 appels d'outils
+- [~] **OC-083** — Multi-tours ≥ 10 appels d'outils
       *Rôles, identifiants d'appels, résultats, raisonnement, streaming, intention initiale.*
 - [ ] **OC-084** — Compatibilité du CLI Ollama
       *`list`, `show`, `ps`, `pull`, `cp`, `rm`, `run` contre `ollama.cpp`.*

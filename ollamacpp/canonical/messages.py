@@ -202,3 +202,45 @@ class ToolResultMessage:
 
 CanonicalMessage = SystemMessage | UserMessage | AssistantMessage | ToolResultMessage
 ContentBlock = TextBlock | ImageInput | ReasoningBlock
+
+
+def link_tool_results(
+    messages: tuple[CanonicalMessage, ...]
+) -> tuple[CanonicalMessage, ...]:
+    """Complète le nom d'outil d'un `ToolResultMessage` depuis l'appel qu'il référence.
+
+    Les protocoles divergent sur ce point : Ollama transmet `tool_name` dans le message de
+    résultat, OpenAI un `name` facultatif, et Anthropic **rien du tout** — son bloc `tool_result`
+    ne porte que `tool_use_id`. L'information n'est pourtant pas perdue : elle est portée par
+    l'appel corrélé, dans la même conversation.
+
+    Reconstituer le nom ici rend la représentation canonique complète quelle que soit la façade
+    d'entrée, ce qui est la condition pour que le même échange conceptuel produise la même
+    représentation (mission §35). Un résultat sans appel correspondant est laissé tel quel plutôt
+    que deviné.
+    """
+    names: dict[str, str] = {}
+    for message in messages:
+        if isinstance(message, AssistantMessage):
+            for call in message.tool_calls:
+                if call.id:
+                    names[call.id] = call.name
+
+    linked: list[CanonicalMessage] = []
+    for message in messages:
+        if (
+            isinstance(message, ToolResultMessage)
+            and not message.name
+            and message.call_id in names
+        ):
+            linked.append(
+                ToolResultMessage(
+                    call_id=message.call_id,
+                    content=message.content,
+                    name=names[message.call_id],
+                    is_error=message.is_error,
+                )
+            )
+        else:
+            linked.append(message)
+    return tuple(linked)

@@ -50,6 +50,7 @@ from ..canonical import (
     ToolDefinition,
     ToolResultMessage,
     UserMessage,
+    link_tool_results,
 )
 from ..errors import BadRequest
 from .common import get_service, read_body
@@ -254,7 +255,9 @@ def build_request(body: dict[str, Any], ref) -> CanonicalRequest:
 
     return CanonicalRequest(
         model=ref,
-        messages=parse_system(body.get("system")) + parse_messages(body.get("messages")),
+        messages=link_tool_results(
+            parse_system(body.get("system")) + parse_messages(body.get("messages"))
+        ),
         tools=parse_tools(body.get("tools")),
         tool_choice=parse_tool_choice(body.get("tool_choice")),
         options=SamplingOptions(
@@ -441,7 +444,9 @@ async def count_tokens(request: Request) -> dict[str, Any]:
 
     canonical = CanonicalRequest(
         model=model.ref,
-        messages=parse_system(body.get("system")) + parse_messages(body.get("messages")),
+        messages=link_tool_results(
+            parse_system(body.get("system")) + parse_messages(body.get("messages"))
+        ),
         tools=parse_tools(body.get("tools")),
         source_api=SourceAPI.ANTHROPIC_MESSAGES,
     )
