@@ -25,6 +25,14 @@ Toutes les modifications notables de `ollama.cpp`.
   versionnés dont les artefacts sont des digests et jamais des chemins ; registre donnant à
   chaque modèle une taille et un digest réels, et lecteur de métadonnées GGUF permettant de
   servir `/api/tags` et `/api/show` sans charger le modèle.
+- Runtime (OC-030 à OC-035) : superviseur lançant une instance `llama-server` par modèle
+  logique avec ses propres drapeaux (`cache_type_k`, `cache_type_v`, Flash Attention,
+  `tensor_split`, decoding spéculatif) ; détection de capacités à partir de faits observables
+  (`/props`, artefacts présents) ; cycle de vie avec chargement single-flight et sémantique
+  `keep_alive` d'Ollama ; ordonnanceur mémoire évinçant en LRU pondéré par priorité sans jamais
+  toucher à un modèle occupé ; journal de décisions explicable.
+- Faux `llama-server` exécutable pour les tests d'intégration : vrai processus, vrai port, vrai
+  HTTP, vrais signaux — seule l'inférence est déterministe.
 
 ## [Publié]
 

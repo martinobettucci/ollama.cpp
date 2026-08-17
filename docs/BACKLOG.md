@@ -57,22 +57,22 @@ les `@verifies` des tests. Ils ne sont jamais réutilisés ni renumérotés.
 
 ## Lot 3 — Runtime
 
-- [ ] **OC-030** — `LlamaServerSupervisor`
+- [~] **OC-030** — `LlamaServerSupervisor`
       *Lancement d'une instance par modèle logique, allocation de port, attente de `/health`,
       arrêt propre, remontée du code de sortie.*
-- [ ] **OC-031** — Construction des arguments runtime
+- [~] **OC-031** — Construction des arguments runtime
       *Contexte, batch, ubatch, parallel, threads, GPU layers, tensor split, Flash Attention,
       `cache_type_k` / `cache_type_v`, draft model, mmproj, adaptateurs.*
-- [ ] **OC-032** — Détection de capacités observables
+- [~] **OC-032** — Détection de capacités observables
       *Depuis `/props` (`modalities`, `chat_template_caps`), le manifest et les artefacts
       présents. Jamais de capacité déclarée non observable.*
-- [ ] **OC-033** — `ModelLifecycleManager`
+- [~] **OC-033** — `ModelLifecycleManager`
       *États `NOT_PRESENT` → `FAILED`, single-flight, refus de `READY` si un artefact obligatoire
       manque.*
-- [ ] **OC-034** — `ModelScheduler`
+- [~] **OC-034** — `ModelScheduler`
       *Admission, estimation mémoire, éviction LRU pondérée par priorité, `keep_alive` expiré
       privilégié, `BUSY` jamais évincé (risque R6).*
-- [ ] **OC-035** — Observabilité des décisions
+- [~] **OC-035** — Observabilité des décisions
       *Journal structuré et explicable de chaque décision du scheduler et de chaque transition.*
 
 ## Lot 4 — Façade Ollama
