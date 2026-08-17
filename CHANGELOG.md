@@ -57,6 +57,13 @@ Toutes les modifications notables de `ollama.cpp`.
 - Suite de conformité (OC-080, OC-081) rejouant la logique exacte d'`ollama-gateway` — sonde
   `_is_served` sur les quinze endpoints de son catalogue, filtrage des listings et injection de
   `options.num_ctx` — contre le service réel.
+- Contrat avec le vrai binaire `llama-server` (OC-085, partiel) : toute ligne de commande
+  produite par le middleware est acceptée par le binaire compilé depuis l'upstream, et sa
+  surface HTTP est vérifiée sur une instance réellement démarrée.
+- Conteneurisation (OC-090 à OC-094) : `Dockerfile` multi-étapes compilant `llama-server` depuis
+  l'upstream à une révision épinglée, fichiers Compose dev/staging/prod, scripts `runDev`,
+  `runStaging` et `runProd`, `.env.example` documentant chaque variable, seed de démonstration
+  passant par les vraies API, contrat de déploiement et manuel d'exploitation.
 
 ## [Publié]
 

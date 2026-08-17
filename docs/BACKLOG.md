@@ -147,18 +147,30 @@ les `@verifies` des tests. Ils ne sont jamais réutilisés ni renumérotés.
       *Le même échange conceptuel produit un `CanonicalRequest` structurellement égal.*
 - [~] **OC-083** — Multi-tours ≥ 10 appels d'outils
       *Rôles, identifiants d'appels, résultats, raisonnement, streaming, intention initiale.*
-- [ ] **OC-084** — Compatibilité du CLI Ollama
-      *`list`, `show`, `ps`, `pull`, `cp`, `rm`, `run` contre `ollama.cpp`.*
-- [ ] **OC-085** — Bout en bout avec un vrai `llama-server`
-      *Modèle minuscule, sans GPU, sans service payant.*
+- [~] **OC-084** — Compatibilité du CLI Ollama
+      *Le protocole que ces commandes utilisent est couvert au niveau HTTP par
+      `tests/test_api_ollama.py` et `tests/test_conformance_gateway.py` (schémas, champs, codes,
+      streaming). L'exécution du **binaire** `ollama` contre `ollama.cpp` n'a pas pu être faite :
+      le binaire n'est pas disponible dans l'environnement de construction et `run` exige un
+      modèle réel (cf. OC-085).*
+- [~] **OC-085** — Bout en bout avec un vrai `llama-server`
+      *VÉRIFIÉ : `llama-server` compilé depuis l'upstream (commit `39be55c`) ; toute ligne de
+      commande produite par OC-031 est acceptée par le binaire réel — l'exécution atteint le
+      chargement du modèle, donc aucun drapeau n'est refusé ; `/health` répond
+      `{"status": "ok"}` et `/v1/models` la forme OpenAI, sur une instance réellement démarrée
+      (`tests/test_llama_server_contract.py`, 44 tests).*
+      *NON VÉRIFIÉ : l'inférence sur un vrai GGUF. La politique réseau de l'environnement de
+      construction bloque le téléchargement de modèles ; aucun GGUF réel n'a pu être chargé.
+      Le reste de la chaîne est couvert par un faux `llama-server` implémentant le contrat HTTP
+      amont. Cette unité reste `[~]` tant qu'une exécution sur modèle réel n'a pas eu lieu.*
 
 ## Lot 9 — Exploitation
 
-- [ ] **OC-090** — Conteneurisation dev / staging / prod
-- [ ] **OC-091** — `runDev`, `runStaging`, `runProd`
-- [ ] **OC-092** — Seed de démonstration reproductible
-- [ ] **OC-093** — Contrat de déploiement (`docs/PROD_MIGRATIONS.md`)
-- [ ] **OC-094** — Manuel utilisateur
+- [~] **OC-090** — Conteneurisation dev / staging / prod
+- [~] **OC-091** — `runDev`, `runStaging`, `runProd`
+- [~] **OC-092** — Seed de démonstration reproductible
+- [~] **OC-093** — Contrat de déploiement (`docs/PROD_MIGRATIONS.md`)
+- [~] **OC-094** — Manuel utilisateur
 
 ---
 

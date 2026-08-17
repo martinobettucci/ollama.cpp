@@ -1,0 +1,31 @@
+# Environnement de STAGING de `ollama.cpp`.
+#
+# @spec docs/BACKLOG.md OC-090 « Conteneurisation dev / staging / prod »
+# @spec docs/DAT.md §8 « Stratégie de déploiement »
+#
+# Variables dédiées, lues depuis `.env.staging` : aucune valeur sensible n'est écrite ici.
+
+services:
+  ollama-cpp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ollama-cpp:staging
+    env_file:
+      - .env.staging
+    ports:
+      - "${OLLAMACPP_PUBLISH_PORT:-11435}:11434"
+    environment:
+      OLLAMACPP_LOG_LEVEL: "${OLLAMACPP_LOG_LEVEL:-INFO}"
+      OLLAMACPP_MAX_LOADED_MODELS: "${OLLAMACPP_MAX_LOADED_MODELS:-2}"
+      OLLAMACPP_MEMORY_LIMIT_BYTES: "${OLLAMACPP_MEMORY_LIMIT_BYTES:-0}"
+    volumes:
+      - models-staging:/models
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: ${OLLAMACPP_MEMORY_LIMIT:-8g}
+
+volumes:
+  models-staging:

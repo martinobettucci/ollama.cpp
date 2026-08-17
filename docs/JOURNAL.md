@@ -151,3 +151,61 @@ au mode routeur si celui-ci gagne les crochets manquants.
 vérifiables dans l'environnement de développement courant (pas de GPU). Suivi en risque R11 :
 les décisions dépendantes du GPU sont isolées derrière une abstraction de mesure mémoire, testée
 par injection.
+
+---
+
+## 2026-08-17 — Vérification contre le vrai `llama-server`
+
+**Problème.** Toute la chaîne était vérifiée contre un faux `llama-server`. Cela prouve la
+cohérence interne du middleware, mais pas que `llama.cpp` accepte réellement ce qu'on lui envoie —
+précisément le risque R10.
+
+**Observations.**
+
+1. `llama-server` a été compilé hors source depuis l'arbre amont, à la révision auditée
+   (`build 50, commit 39be55c`). L'arbre `llama.cpp` est resté intact, ce qui a été vérifié après
+   coup par `git status`.
+2. `llama-server` valide ses arguments **avant** de toucher au modèle : un drapeau inconnu produit
+   `error: invalid argument: --xxx` et un arrêt immédiat. Atteindre l'erreur de chargement du
+   modèle prouve donc que toute la ligne de commande a été acceptée.
+3. Le mode routeur (`--models-dir`) démarre **sans charger de modèle**. C'est ce qui a permis de
+   vérifier en vrai le contrat HTTP dont dépend le superviseur : `/health` répond exactement
+   `{"status": "ok"}` et `/v1/models` la forme OpenAI.
+
+**Décision.** Écrire `tests/test_llama_server_contract.py`, activé par
+`OLLAMACPP_TEST_LLAMA_SERVER` et ignoré sinon. Il couvre chaque configuration runtime que le
+middleware sait produire, la présence de chaque drapeau dans l'aide, et la surface HTTP réelle.
+Deux contre-épreuves y figurent : un drapeau inconnu doit bien être refusé, et l'échec de
+chargement doit bien porter sur le fichier de modèle — sans elles, un test qui ne peut pas
+échouer ne prouverait rien.
+
+**Vérifications réalisées.** 44 tests passent contre le binaire réel. La ligne de commande la plus
+complète que le middleware sache produire — contexte, batch, ubatch, parallélisme, threads,
+couches GPU, `tensor-split`, Flash Attention, `cache-type-k`/`v`, `kv-unified`, `no-mmap`,
+decoding spéculatif, `reasoning-format` — est acceptée sans réserve.
+
+**Limite, explicitement non résolue.** L'inférence sur un vrai GGUF n'a **pas** pu être vérifiée :
+la politique réseau de l'environnement de construction bloque `huggingface.co` (403 sur CONNECT),
+donc aucun modèle réel n'était disponible. OC-085 reste `[~]`. Ce qui est prouvé est le contrat
+d'interface ; ce qui ne l'est pas est la génération de tokens de bout en bout.
+
+---
+
+## 2026-08-17 — `/api/pull` et les chemins de fichiers locaux
+
+**Problème.** La première implémentation de `/api/pull` acceptait un chemin de fichier local comme
+source. Le test de conformité a montré qu'elle renvoyait un 404 : le registre résout d'abord le
+nom, et un chemin comme `/tmp/x/modele.gguf` n'est pas un nom de modèle Ollama valide.
+
+**Observation.** Ollama ne l'accepte pas davantage. Son chemin natif pour un GGUF local est
+`POST /api/blobs/<digest>` puis `POST /api/create` avec `files` — déjà implémenté et testé ici
+(OC-053, OC-054).
+
+**Décision.** Retirer la branche « fichier local » de `pull`, plutôt que d'inventer une règle de
+dérivation de nom qui aurait surpris l'utilisateur (quel nom porterait
+`/tmp/x/qwen3-8b-instruct.gguf` ?). Le message d'erreur de `pull` énumère désormais les trois
+voies possibles.
+
+**Conséquence.** Une capacité en moins, mais alignée sur Ollama et sans comportement surprenant.
+OC-060 passe `[x]` avec cette justification explicite, plutôt que de rester une case à moitié
+cochée.

@@ -80,3 +80,9 @@ htmlcov/
 
 # --- Données locales de modèles (jamais versionnées : blobs GGUF volumineux) ---
 /models/
+
+# --- Environnements (secrets, jamais versionnés) ---
+.env
+.env.prod
+.env.staging
+.env.local

@@ -78,39 +78,103 @@ Les versions de dépendances sont alignées sur celles d'`ollama-gateway` pour �
 
 ## État du projet
 
-**En cours de construction.** L'audit des dépôts amont et l'architecture sont terminés et
-documentés ; l'implémentation suit le plan du §7 de `docs/ollama.cpp-architecture.md`.
+Les quatre façades, le registre, le cycle de vie, l'ordonnanceur et le téléchargement sont
+implémentés et couverts par 640 tests, dont des tests d'API de bout en bout et une suite de
+conformité rejouant la logique d'`ollama-gateway`.
 
-L'état réel, unité par unité, est tenu dans **`docs/BACKLOG.md`**, qui fait foi. Aucune
-fonctionnalité n'est annoncée ici avant d'y être marquée `[x]`.
+**Ce qui reste non vérifié** : l'inférence sur un vrai modèle GGUF (voir « Limites connues »).
+L'état réel, unité par unité, est tenu dans **`docs/BACKLOG.md`**, qui fait foi — une unité n'y
+passe `[x]` qu'après validation complète de sa Definition of Done.
 
 ## Installation
 
-_À compléter avec l'unité de backlog OC-010 (configuration) et OC-090 (conteneurisation)._
+### Avec Docker (recommandé)
+
+L'image compile `llama-server` depuis l'upstream à une révision épinglée, puis installe le
+service. Aucune source de `llama.cpp` n'est vendorée dans ce dépôt.
+
+```bash
+cp .env.example .env.prod        # puis compléter
+./runProd
+```
+
+### Sans Docker
+
+```bash
+pip install -r requirements.txt
+export OLLAMACPP_LLAMA_SERVER_BIN=/chemin/vers/llama-server
+python -m ollamacpp
+```
+
+Le binaire `llama-server` se compile depuis les sources de `llama.cpp` :
+
+```bash
+cmake -S llama.cpp -B build -DCMAKE_BUILD_TYPE=Release -DLLAMA_BUILD_TOOLS=ON
+cmake --build build --target llama-server -j"$(nproc)"
+```
 
 ## Commandes principales
 
-_À compléter avec les unités de backlog OC-090 et OC-091._
+| Commande | Effet |
+|---|---|
+| `./runDev` | environnement de développement conteneurisé |
+| `./runStaging` | environnement de staging (exige `.env.staging`) |
+| `./runProd` | environnement de production (exige `.env.prod`) |
+| `python -m ollamacpp` | lancement direct, sans conteneur |
+| `python scripts/seed.py --verify` | installe un modèle de démonstration et vérifie l'inférence |
+| `pytest` | suite de tests (les tests marqués `e2e` sont ignorés sans binaire amont) |
+| `pytest -m conformance` | conformité vis-à-vis d'`ollama-gateway` uniquement |
+| `OLLAMACPP_TEST_LLAMA_SERVER=/chemin/llama-server pytest -m e2e` | contrat avec le vrai binaire `llama-server` |
+| `docker compose -f docker-compose.dev.yml down -v` | arrêt et réinitialisation des données locales |
 
-Les commandes cibles sont `./runDev`, `./runStaging`, `./runProd` pour les environnements
-conteneurisés, `pytest` pour les tests, et `python -m ollamacpp` pour un lancement direct.
+Il n'y a **pas d'étape de build** pour le service lui-même : c'est du Python pur. Le seul artefact
+compilé est `llama-server`, produit par l'image Docker ou fourni par l'exploitant.
 
 ## Variables d'environnement
 
-_À compléter avec l'unité de backlog OC-010._ Chaque variable sera documentée avec son rôle, son
-format attendu, son caractère obligatoire ou facultatif et une valeur d'exemple non sensible.
+Toutes les variables sont documentées dans **`.env.example`** — rôle, format, caractère
+obligatoire, valeur d'exemple non sensible. Les principales :
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `OLLAMACPP_PORT` | `11434` | port d'écoute, celui qu'attendent les clients Ollama |
+| `OLLAMACPP_MODELS` | `~/.ollama.cpp/models` | répertoire des blobs et manifests |
+| `OLLAMACPP_LLAMA_SERVER_BIN` | `llama-server` | binaire d'inférence |
+| `OLLAMACPP_KEEP_ALIVE` | `5m` | résidence par défaut (nombre = secondes, négatif = illimité) |
+| `OLLAMACPP_MAX_LOADED_MODELS` | `3` | nombre maximal de modèles résidents |
+| `OLLAMACPP_MEMORY_LIMIT_BYTES` | `0` (auto) | budget mémoire de l'ordonnanceur |
+| `OLLAMACPP_MANAGEMENT_ENABLED` | `true` | autorise `pull`/`create`/`copy`/`delete`/`blobs` |
+| `OLLAMACPP_API_KEY` | vide | si défini, exige `Authorization: Bearer` |
+| `OLLAMACPP_REGISTRY_URL` / `_TOKEN` | vide | registre privé |
+
+Les variables marquées SECRET dans `.env.example` ne doivent jamais être committées. Leur valeur
+est masquée dans les journaux, ce que vérifie un test dédié.
 
 ## Structure du dépôt
 
 ```
+ollamacpp/
+  config.py errors.py names.py durations.py   configuration, erreurs, nommage, keep_alive
+  gguf.py observability.py backend.py         métadonnées GGUF, journal, pont llama-server
+  sources.py service.py app.py                téléchargement, assemblage, application ASGI
+  canonical/       représentation conversationnelle unique des quatre façades
+  storage/         magasin de blobs adressé par contenu, manifests
+  registry/        registre des modèles installés
+  runtime/         superviseur, capacités, cycle de vie, ordonnanceur, mémoire
+  api/             façades Ollama, OpenAI, Responses, Anthropic
+tests/             unitaires, intégration, API, conformité, contrat llama-server
+scripts/seed.py    données de démonstration, via les vraies API
 docs/
   ollama.cpp-architecture.md   document fondateur : audit, matrice, plan, risques
   DAT.md                       dossier d'architecture technique
   BACKLOG.md                   état réel du projet, unités OC-xxx (fait foi)
   JOURNAL.md                   décisions et investigations
+  PROD_MIGRATIONS.md           contrat de déploiement
+  manual.md                    manuel d'exploitation
   DESIGN_SYSTEM.md             charte d'interface P2Enjoy
-CHANGELOG.md
-README.md
+Dockerfile  docker-compose.{dev,staging,prod}.yml  runDev runStaging runProd
+.env.example
+CHANGELOG.md  README.md
 ```
 
 ## Limites connues
@@ -126,6 +190,17 @@ README.md
   pas lu tel quel.
 - **Pas de GPU dans l'environnement de développement de référence** : le comportement d'offload et
   l'occupation VRAM ne sont pas vérifiables localement. Suivi en risque R11.
+- **Inférence sur un vrai modèle non vérifiée dans cet environnement.** Le binaire `llama-server`
+  a bien été compilé et son contrat vérifié — tous les drapeaux émis par le middleware sont
+  acceptés, `/health` et `/v1/models` répondent conformément —, mais la politique réseau de
+  l'environnement de construction bloque le téléchargement de modèles, donc aucun GGUF réel n'a
+  pu être chargé. La chaîne complète est couverte par un faux `llama-server` implémentant le
+  contrat HTTP amont. Suivi en OC-085 dans `docs/BACKLOG.md`.
+- **`/api/pull` n'accepte pas un chemin de fichier local** : ce n'est pas un nom de modèle Ollama
+  valide, et Ollama ne l'accepte pas davantage. Un GGUF local s'installe par
+  `POST /api/blobs/<digest>` puis `POST /api/create`.
+- **Pas de quantisation à la volée** dans `/api/create` : le GGUF doit être quantifié en amont.
+  L'endpoint répond `501` avec un message explicite plutôt que d'ignorer le champ.
 
 ## Documentation
 

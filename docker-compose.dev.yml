@@ -1,0 +1,33 @@
+# Environnement de DÉVELOPPEMENT de `ollama.cpp`.
+#
+# @spec docs/BACKLOG.md OC-090 « Conteneurisation », OC-092 « Seed de démonstration »
+# @spec docs/DAT.md §8 « Stratégie de déploiement », §13 « Données de développement »
+#
+# Autonome : aucun service payant, aucun compte, aucune clé. Le seul accès réseau nécessaire est
+# le téléchargement du modèle de démonstration, inévitable pour faire de l'inférence réelle.
+
+services:
+  ollama-cpp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ollama-cpp:dev
+    ports:
+      - "11434:11434"
+    environment:
+      OLLAMACPP_LOG_LEVEL: DEBUG
+      # Petit modèle de démonstration : deux modèles résidents suffisent en développement.
+      OLLAMACPP_MAX_LOADED_MODELS: "2"
+      OLLAMACPP_KEEP_ALIVE: "5m"
+      OLLAMACPP_DEFAULT_CONTEXT: "4096"
+      # Gestion du catalogue ouverte en développement : c'est ce qui permet de seeder.
+      OLLAMACPP_MANAGEMENT_ENABLED: "true"
+    volumes:
+      - models-dev:/models
+      # Code monté en lecture seule : éditer sur l'hôte, relancer le conteneur pour recharger.
+      - ./ollamacpp:/app/ollamacpp:ro
+      - ./scripts:/app/scripts:ro
+    restart: unless-stopped
+
+volumes:
+  models-dev:
