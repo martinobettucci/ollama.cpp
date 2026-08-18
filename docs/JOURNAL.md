@@ -392,3 +392,64 @@ d'outil n'est requalifié en instruction utilisateur.
 requis, activés par `OLLAMACPP_TEST_HF_PULL=1`). La limite « le modèle de test produit du
 charabia » du README est désormais compensée : un vrai modèle entraîné vérifie la justesse des
 réponses. La limite `tool_choice` de `llama-server` est ajoutée aux limites connues.
+
+---
+
+## 2026-08-18 — Vision réelle : un projecteur, quatre couleurs, trois défauts
+
+**Contexte.** Le responsable demande de vérifier le `mmproj` sur un petit modèle de vision.
+`ggml-org/SmolVLM-256M-Instruct-GGUF` est retenu : 256 M de paramètres, publié par l'équipe de
+`llama.cpp`, et — trait décisif pour la suite — il publie **un projecteur par quantification**.
+
+**Observation nominale.** Le `pull` tire les deux artefacts en 19 s : modèle 175 054 528 octets,
+projecteur 103 769 856 octets, chacun avec son digest recalculé. `/api/show` annonce
+`["completion", "vision"]`.
+
+Mais une capacité annoncée n'est pas une capacité observée. La mission (§13) l'interdit
+explicitement. J'ai donc fabriqué des images — `scripts/make_test_image.py`, encodeur PNG de
+quelques lignes plutôt qu'une dépendance à Pillow — et soumis quatre couleurs franches. Le modèle
+répond `Red`, `Blue`, `Green`, `Yellow` : **4 sur 4**. Une couleur ne se devine pas ; l'image
+traverse réellement le projecteur.
+
+Le binaire `ollama` officiel confirme le parcours canonique de bout en bout : `ollama show`
+affiche une section « Projector » (`clip`, 93,51 M de paramètres), et
+`ollama run <modèle> "What color… /chemin/image.png"` imprime « Added image » puis répond `Blue`.
+
+**Défaut 1 — le garde-fou de capacités manquait sur deux façades.** La contre-épreuve, une image
+envoyée au Qwen textuel, a révélé une asymétrie : Ollama et OpenAI répondaient `400 … does not
+support vision`, mais Responses et Anthropic laissaient l'image atteindre `llama-server`. Son
+refus remontait en `502` portant un message d'amont — « you may need to provide the mmproj ».
+Deux défauts en un : un `502` annonce une panne du serveur là où la requête est simplement
+invalide, et ce conseil s'adresse à l'exploitant, pas au client.
+
+Cause : le contrôle était **dupliqué**, une copie dans `api/ollama.py`, une autre dans
+`api/openai.py`, aucune ailleurs. Un garde-fou par façade est un garde-fou qu'on oublie.
+Correction : une seule fonction `api/common.py::reject_unsupported`, appelée par les quatre
+façades ; les deux copies sont supprimées. Treize tests, dont quatre écrits en échec avant la
+correction, et un test dédié à l'absence de fuite du mot `mmproj` vers le client.
+
+**Défaut 2 — le projecteur n'était pas apparié.** Le projecteur était choisi par
+`sorted(projectors)[0]`, sans rapport avec le fichier de poids retenu. Demander `:f16` livrait
+donc le modèle en f16 et l'encodeur d'image en Q8_0. Le résultat fonctionne — `llama.cpp` accepte
+l'écart — ce qui rend la surprise d'autant plus silencieuse : la demande explicite de
+l'utilisateur était contredite sans le moindre signal. Un dépôt qui prend la peine de publier les
+deux variantes exprime une intention ; la suivre est le comportement le moins surprenant.
+`_pair_projector` compare le dernier segment du nom de fichier, avec repli sur le premier
+projecteur lorsqu'aucun ne correspond — cas de `ggml-org/Qwen2-VL-2B-Instruct-GGUF:Q4_K_M`, dont
+le dépôt ne publie pas de projecteur en Q4_K_M.
+
+**Défaut 3 — un projecteur pouvait être retenu comme modèle.** La sélection par motif
+(`dépôt:motif`) cherchait parmi **tous** les GGUF, projecteurs compris. Sur un dépôt publiant
+`mmproj-…-f16.gguf`, `:f16` pouvait donc désigner un projecteur comme fichier de poids. Corrigé
+en restreignant la recherche aux poids ; le message d'erreur reste inchangé.
+
+**Hypothèse invalidée, consignée.** Un test supposait qu'envoyer une image à un modèle textuel
+depuis le CLI produirait une erreur. Il a échoué : le CLI sort en `0`. Lecture de l'amont —
+`cmd/cmd.go` l. 854-867 — le CLI décide **lui-même** d'attacher ou non un fichier, à partir de
+`Capabilities`, de `ProjectorInfo` et des clés `.vision.` que le serveur annonce. Il n'attache
+donc rien et envoie le chemin comme du texte. Le comportement était correct, mon attente ne
+l'était pas. Le test a été réécrit pour vérifier ce qui relève réellement d'`ollama.cpp` : qu'aucun
+de ces trois signaux ne fuit sur un modèle purement textuel.
+
+**Conséquence.** 774 tests passent avec le vrai `llama-server`, le vrai binaire `ollama`, Hugging
+Face et un vrai modèle multimodal.

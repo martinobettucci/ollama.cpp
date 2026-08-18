@@ -73,7 +73,28 @@ curl http://localhost:11434/api/pull -d '{"model":"hf.co/<propriétaire>/<dépô
 
 Un fichier précis peut être choisi en le suffixant : `hf.co/<propriétaire>/<dépôt>:Q4_K_M.gguf`.
 Sans précision, le premier GGUF non-projecteur du dépôt est retenu, et un éventuel `mmproj` est
-associé automatiquement — le modèle devient alors capable de vision.
+associé automatiquement — le modèle devient alors capable de vision. Le motif ne porte que sur les
+**poids** : un fichier `mmproj-…` ne peut jamais être retenu comme modèle.
+
+Lorsqu'un dépôt publie un projecteur **par quantification** — cas fréquent des modèles de vision,
+par exemple `ggml-org/SmolVLM-256M-Instruct-GGUF` — le projecteur retenu est celui dont la
+quantification correspond à celle du poids choisi. Demander `:f16` livre donc le modèle *et*
+l'encodeur d'image en f16. Si aucun ne correspond, le premier par ordre alphabétique est associé :
+un dépôt n'offrant qu'un projecteur le destine à tous ses poids.
+
+Exemple complet, avec projecteur :
+
+```bash
+curl http://localhost:11434/api/pull \
+  -d '{"model":"hf.co/ggml-org/SmolVLM-256M-Instruct-GGUF"}'
+curl http://localhost:11434/api/show \
+  -d '{"model":"hf.co/ggml-org/SmolVLM-256M-Instruct-GGUF"}' | grep -o '"capabilities":[^]]*]'
+```
+
+La capacité `vision` n'apparaît que si le projecteur est effectivement installé et reconnu par le
+runtime. Pour l'utiliser, joindre l'image en base64 dans `messages[].images` (façade Ollama), ou
+dans le bloc typé prévu par la façade employée. Un modèle sans projecteur refuse l'image en `400`
+avec le message `"<modèle>" does not support vision`, identiquement sur les quatre façades.
 
 Exemple complet, vérifié :
 

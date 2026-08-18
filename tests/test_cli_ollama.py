@@ -242,3 +242,152 @@ class TestCliOllama:
         resultat = ollama(service_ollama_cpp, "show", "nexiste-pas:v1")
         assert resultat.returncode != 0
         assert "not found" in (resultat.stdout + resultat.stderr).lower()
+
+
+# --- Vision : le parcours canonique de l'utilisateur final ---------------------------------------
+
+
+#: Dépôt de vision réel. Ces tests supposent en plus un accès réseau, comme
+#: `tests/test_e2e_huggingface.py`, et sont ignorés sans `OLLAMACPP_TEST_HF_PULL=1`.
+REPO_VISION = "hf.co/ggml-org/SmolVLM-256M-Instruct-GGUF"
+
+besoin_vision = pytest.mark.skipif(
+    CLI is None or LLAMA_SERVER is None
+    or os.environ.get("OLLAMACPP_TEST_HF_PULL") != "1",
+    reason="requiert OLLAMACPP_TEST_OLLAMA_CLI, OLLAMACPP_TEST_LLAMA_SERVER, "
+           "OLLAMACPP_TEST_HF_PULL=1 et un accès réseau",
+)
+
+
+@pytest.fixture(scope="module")
+def service_vision_cli(tmp_path_factory):
+    """`ollama.cpp` réel, en processus séparé, servant un vrai modèle de vision tiré de HF.
+
+    Un vrai processus est indispensable ici comme pour les autres tests du CLI : le binaire parle
+    en HTTP à une adresse, il ne peut pas être branché sur un client en mémoire.
+    """
+    if CLI is None or LLAMA_SERVER is None or os.environ.get("OLLAMACPP_TEST_HF_PULL") != "1":
+        pytest.skip("environnement incomplet")
+
+    import httpx
+
+    base = tmp_path_factory.mktemp("cli-vision")
+    port = 11578
+    service = subprocess.Popen(
+        [sys.executable, "-m", "ollamacpp"],
+        cwd=str(RACINE),
+        env={
+            **os.environ,
+            "OLLAMACPP_MODELS": str(base / "models"),
+            "OLLAMACPP_HOST": "127.0.0.1",
+            "OLLAMACPP_PORT": str(port),
+            "OLLAMACPP_LLAMA_SERVER_BIN": LLAMA_SERVER,
+            "OLLAMACPP_LLAMA_SERVER_PORT_MIN": "19600",
+            "OLLAMACPP_LLAMA_SERVER_PORT_MAX": "19699",
+            "OLLAMACPP_LOAD_TIMEOUT_S": "240",
+            "OLLAMACPP_DEFAULT_CONTEXT": "4096",
+        },
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+    )
+
+    adresse = f"http://127.0.0.1:{port}"
+    try:
+        limite = time.monotonic() + 60
+        while time.monotonic() < limite:
+            if service.poll() is not None:
+                pytest.fail(f"ollama.cpp s'est arrêté : {service.stdout.read()[-500:]}")
+            try:
+                if httpx.get(f"{adresse}/api/version", timeout=2.0).status_code == 200:
+                    break
+            except httpx.HTTPError:
+                time.sleep(0.3)
+        else:
+            pytest.fail("ollama.cpp n'a pas démarré dans le délai imparti")
+
+        tire = httpx.post(f"{adresse}/api/pull", json={"model": REPO_VISION, "stream": False},
+                          timeout=1800.0)
+        if tire.status_code != 200:
+            pytest.skip(f"pull impossible : {tire.text[:160]}")
+        yield adresse
+    finally:
+        service.terminate()
+        try:
+            service.wait(timeout=25)
+        except subprocess.TimeoutExpired:
+            service.kill()
+
+
+@besoin_vision
+class TestCliOllamaVision:
+    """Ce que voit un utilisateur qui n'a que son clavier et le binaire officiel."""
+
+    def test_show_annonce_la_vision_et_le_projecteur(self, service_vision_cli):
+        """Le CLI affiche une section « Projector » à partir de `/api/show`.
+
+        Elle n'existe que si les métadonnées du `mmproj` sont exposées : un projecteur
+        téléchargé mais non décrit passerait inaperçu à l'écran.
+        """
+        resultat = ollama(service_vision_cli, "show", REPO_VISION)
+        assert resultat.returncode == 0, resultat.stderr
+        sortie = resultat.stdout
+        assert "Capabilities" in sortie and "vision" in sortie
+        assert "Projector" in sortie, f"section Projector absente : {sortie[:300]}"
+        assert "clip" in sortie
+
+    def test_run_avec_une_image_decrit_la_couleur(self, service_vision_cli, tmp_path):
+        """`ollama run modèle "question /chemin/image.png"` : le parcours canonique complet.
+
+        Le CLI détecte le chemin dans le prompt, lit le fichier, l'encode et le transmet dans
+        `images`. Une couleur ne se devine pas : la réponse prouve que l'image a traversé toute la
+        chaîne, du binaire officiel jusqu'au projecteur.
+        """
+        sys.path.insert(0, str(RACINE))
+        from scripts.make_test_image import FORMES
+
+        image = tmp_path / "disque-bleu.png"
+        image.write_bytes(FORMES["disque"]("bleu", 224))
+
+        resultat = ollama(service_vision_cli, "run", REPO_VISION,
+                          f"What color is the shape in this image? {image}", timeout=600)
+        assert resultat.returncode == 0, resultat.stderr
+        assert "Added image" in resultat.stdout + resultat.stderr
+        assert "blue" in resultat.stdout.lower(), f"réponse inattendue : {resultat.stdout[-200:]!r}"
+
+    def test_sur_un_modele_sans_vision_le_cli_nattache_pas_limage(self, service_vision_cli,
+                                                                  tmp_path):
+        """Le CLI décide lui-même, à partir des capacités que `ollama.cpp` annonce.
+
+        `cmd/cmd.go` l. 854-867 : `opts.MultiModal` vient de `Capabilities` contenant `vision`,
+        ou — pour les serveurs antérieurs au champ `capabilities` — de `ProjectorInfo` non vide ou
+        d'une clé `model_info` contenant `.vision.`. Un chemin de fichier n'est extrait du prompt
+        que si ce drapeau est vrai.
+
+        Le test porte donc sur ce que `ollama.cpp` déclare : si l'un de ces trois signaux fuyait
+        sur un modèle purement textuel, le CLI attacherait une image que le modèle ne sait pas
+        lire. Le marqueur observable est « Added image », que le binaire n'imprime que lorsqu'il
+        attache réellement un fichier.
+        """
+        import httpx
+
+        texte = "hf.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF:q4_k_m"
+        tire = httpx.post(f"{service_vision_cli}/api/pull",
+                          json={"model": texte, "stream": False}, timeout=1800.0)
+        if tire.status_code != 200:
+            pytest.skip(f"pull impossible : {tire.text[:160]}")
+
+        sys.path.insert(0, str(RACINE))
+        from scripts.make_test_image import FORMES
+
+        image = tmp_path / "disque-rouge.png"
+        image.write_bytes(FORMES["disque"]("rouge", 224))
+
+        resultat = ollama(service_vision_cli, "run", texte,
+                          f"Describe this image {image}", timeout=600)
+        sorties = resultat.stdout + resultat.stderr
+        assert "Added image" not in sorties, (
+            "le CLI a attaché une image à un modèle sans vision : `ollama.cpp` annonce un signal "
+            f"de vision qu'il ne devrait pas — {sorties[:200]!r}")
+
+        montre = ollama(service_vision_cli, "show", texte).stdout
+        assert "Projector" not in montre
+        assert "vision" not in montre.lower()

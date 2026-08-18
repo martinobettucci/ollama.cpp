@@ -77,9 +77,26 @@ Toutes les modifications notables de `ollama.cpp`.
   taille à l'octet près et le digest recalculé, puis charge le modèle et vérifie une réponse
   **juste**, un appel d'outil réel et la boucle complète sur son résultat. Activé par
   `OLLAMACPP_TEST_HF_PULL=1`.
+- Vérification de la vision sur un vrai modèle multimodal : `ggml-org/SmolVLM-256M-Instruct-GGUF`
+  est tiré avec son projecteur, et décrit correctement quatre couleurs distinctes sur les quatre
+  façades ainsi que depuis le binaire `ollama` officiel (`ollama run modèle "question image.png"`).
+- `scripts/make_test_image.py` : générateur d'images PNG de test sans dépendance externe (aplat,
+  disque, carré, palette de la charte), pour que la vérification de la vision repose sur une
+  observation et non sur un fichier versionné.
 
 ### Corrigé
 
+- Le garde-fou de capacités n'existait que sur les façades Ollama et OpenAI. Une image envoyée à
+  un modèle sans projecteur traversait les façades Responses et Anthropic jusqu'à `llama-server`,
+  dont le refus remontait en `502` accompagné d'un conseil destiné à l'exploitant. Les quatre
+  façades partagent désormais `reject_unsupported` et répondent `400 … does not support vision`.
+- Le projecteur d'un dépôt Hugging Face était choisi par tri alphabétique, sans rapport avec le
+  fichier de poids retenu : demander `:f16` livrait un modèle f16 et un encodeur d'image en Q8_0,
+  silencieusement. Le projecteur est maintenant apparié à la quantification du poids, avec repli
+  sur le premier lorsqu'aucun ne correspond.
+- La sélection d'un fichier précis (`dépôt:motif`) cherchait parmi **tous** les GGUF du dépôt,
+  projecteurs compris : un `mmproj` pouvait être retenu comme modèle. La recherche est restreinte
+  aux poids.
 - Le nombre de paramètres n'était lu que dans `general.parameter_count`, clé absente de beaucoup
   de GGUF publiés — dont ceux de Qwen. `ollama show` affichait alors une ligne « parameters »
   vide. Il est désormais **calculé** en additionnant les éléments de la table des tenseurs, comme

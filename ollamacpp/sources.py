@@ -158,23 +158,25 @@ async def _resolve_huggingface(
 
     projectors = [f for f in files if "mmproj" in f.lower()]
     weights = [f for f in files if f not in projectors]
+    if not weights:
+        raise PullError(f"repository {repo_id} contains only projector files")
 
     if wanted:
-        matching = [f for f in files if f.endswith(wanted) or wanted in f]
+        # La recherche porte sur les **poids** seuls : sans cela, `:f16` pourrait retenir
+        # `mmproj-…-f16.gguf` comme modèle, un projecteur n'étant pas un modèle.
+        matching = [f for f in weights if f.endswith(wanted) or wanted in f]
         if not matching:
             raise PullError(f"no file matching '{wanted}' in repository {repo_id}")
         chosen = matching[0]
-    elif weights:
-        chosen = sorted(weights)[0]
     else:
-        raise PullError(f"repository {repo_id} contains only projector files")
+        chosen = sorted(weights)[0]
 
     artifacts: dict[str, dict[str, Any]] = {
         "model": {"kind": "url", "url": f"{endpoint}/{repo_id}/resolve/main/{chosen}",
                   "headers": headers, "name": chosen.rsplit("/", 1)[-1]}
     }
-    if projectors:
-        projector = sorted(projectors)[0]
+    projector = _pair_projector(chosen, projectors)
+    if projector is not None:
         artifacts["mmproj"] = {
             "kind": "url",
             "url": f"{endpoint}/{repo_id}/resolve/main/{projector}",
@@ -183,6 +185,40 @@ async def _resolve_huggingface(
         }
 
     return ModelSource(type="huggingface", reference=repo_id), artifacts
+
+
+def _quantization_suffix(filename: str) -> str:
+    """Dernier segment d'un nom de GGUF, qui porte par convention la quantification.
+
+    `SmolVLM-256M-Instruct-Q8_0.gguf` → `q8_0` ; `…-f16.gguf` → `f16`. C'est une convention de
+    nommage, pas une garantie du format : elle sert uniquement à apparier deux fichiers d'un même
+    dépôt, jamais à décider de quoi que ce soit d'autre.
+    """
+    base = filename.rsplit("/", 1)[-1]
+    if base.lower().endswith(".gguf"):
+        base = base[: -len(".gguf")]
+    return base.rsplit("-", 1)[-1].lower()
+
+
+def _pair_projector(chosen_weights: str, projectors: list[str]) -> str | None:
+    """Choisit le projecteur qui va avec le fichier de poids retenu.
+
+    Les dépôts de vision publient souvent un `mmproj` **par quantification**
+    (`ggml-org/SmolVLM-256M-Instruct-GGUF` en est un exemple). Prendre le premier par ordre
+    alphabétique livrait alors un encodeur d'image d'une autre précision que celle demandée :
+    `:f16` donnait un modèle f16 et un projecteur Q8_0, sans que rien ne le signale. Le résultat
+    fonctionne — `llama.cpp` accepte l'écart — ce qui rend la surprise d'autant plus silencieuse.
+
+    À défaut de correspondance, le premier par ordre alphabétique reste retenu : un dépôt qui ne
+    publie qu'un projecteur le destine à tous ses poids.
+    """
+    if not projectors:
+        return None
+    voulu = _quantization_suffix(chosen_weights)
+    for projector in sorted(projectors):
+        if _quantization_suffix(projector) == voulu:
+            return projector
+    return sorted(projectors)[0]
 
 
 async def _resolve_private(

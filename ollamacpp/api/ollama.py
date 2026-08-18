@@ -45,7 +45,7 @@ from ..storage.blobs import BlobError, is_valid_digest
 from ..storage.manifests import Artifacts, Manifest, ManifestError, RuntimeConfig
 from . import ollama_parse as parse
 from . import ollama_serialize as serialize
-from .common import get_service, read_body, require_management
+from .common import get_service, read_body, reject_unsupported, require_management
 
 NDJSON = "application/x-ndjson"
 
@@ -221,7 +221,7 @@ async def _run_inference(
         # modèle réellement en mémoire, alors qu'avant chargement on ne dispose que du GGUF, ce
         # qui produit des faux négatifs (un template dont le rendu des outils n'est pas
         # détectable textuellement serait refusé à tort).
-        _reject_unsupported(resident, canonical, requested=canonical.model.display_shortest())
+        reject_unsupported(resident, canonical, requested=canonical.model.display_shortest())
 
         load_s = max(0.0, resident.loaded_at - started) if resident.loaded_at > started else 0.0
         model_name = resident.name
@@ -334,25 +334,6 @@ async def generate(request: Request):
 
     canonical = parse.parse_generate_request(body, model.ref)
     return await _run_inference(service, body, canonical, source="generate")
-
-
-def _reject_unsupported(resident, canonical, *, requested: str) -> None:
-    """Refuse une requête que le modèle ne peut pas honorer, avec le message d'Ollama.
-
-    Les capacités utilisées sont celles détectées au chargement depuis `/props` : ce sont les
-    plus fiables, puisqu'elles décrivent le modèle réellement en mémoire (OC-032). Annoncer une
-    capacité absente puis échouer à l'exécution serait pire que refuser — le client ne saurait
-    pas si c'est lui ou le serveur qui a tort.
-    """
-    capabilities = resident.capabilities
-    if canonical.thinking.is_requested and "thinking" not in capabilities:
-        raise BadRequest(f'"{requested}" does not support thinking')
-    if canonical.tools and "tools" not in capabilities:
-        raise BadRequest(f'"{requested}" does not support tools')
-    if any(getattr(message, "images", ()) for message in canonical.messages) and (
-        "vision" not in capabilities
-    ):
-        raise BadRequest(f'"{requested}" does not support vision')
 
 
 def _unload_ack(model: str, source: str) -> dict[str, Any]:

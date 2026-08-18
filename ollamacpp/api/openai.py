@@ -52,7 +52,7 @@ from ..canonical import (
 from ..errors import BadRequest
 from ..runtime.capabilities import detect
 from ..service import Service
-from .common import get_service, read_body
+from .common import get_service, read_body, reject_unsupported
 
 router = APIRouter()
 
@@ -373,7 +373,7 @@ async def chat_completions(request: Request):
 
     created = int(time.time())
     async with service.lifecycle.acquire(model.name) as resident:
-        _reject_unsupported_openai(resident, canonical)
+        reject_unsupported(resident, canonical)
         upstream = backend.serialize_request(canonical, model_id=resident.name)
         client = resident.instance.client
 
@@ -438,21 +438,6 @@ async def _chat_sse(client, upstream, model: str, created: int) -> AsyncIterator
         }
     yield frame(final)
     yield b"data: [DONE]\n\n"
-
-
-def _reject_unsupported_openai(resident, canonical: CanonicalRequest) -> None:
-    """Refuse une requête que le modèle ne peut pas honorer.
-
-    Comme pour la façade Ollama, les capacités viennent de `/props` du modèle chargé : c'est la
-    seule source qui décrit le modèle réellement en mémoire (OC-032).
-    """
-    capabilities = resident.capabilities
-    if canonical.tools and "tools" not in capabilities:
-        raise BadRequest(f'"{resident.name}" does not support tools')
-    if any(getattr(message, "images", ()) for message in canonical.messages) and (
-        "vision" not in capabilities
-    ):
-        raise BadRequest(f'"{resident.name}" does not support vision')
 
 
 # --- Completions (legacy) ---------------------------------------------------------------------------

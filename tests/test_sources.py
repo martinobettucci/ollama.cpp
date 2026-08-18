@@ -80,6 +80,15 @@ class RegistreHandler(BaseHTTPRequestHandler):
                 return self._send(json.dumps({"error": "not found"}).encode(), status=404)
             if depot == "org/sans-gguf":
                 return self._send(json.dumps({"siblings": [{"rfilename": "README.md"}]}).encode())
+            if depot == "org/multi":
+                # Dépôt de vision réaliste : chaque quantification a **son** projecteur, comme
+                # `ggml-org/SmolVLM-256M-Instruct-GGUF`.
+                return self._send(json.dumps({"siblings": [
+                    {"rfilename": "Vision-256M-Q8_0.gguf"},
+                    {"rfilename": "Vision-256M-f16.gguf"},
+                    {"rfilename": "mmproj-Vision-256M-Q8_0.gguf"},
+                    {"rfilename": "mmproj-Vision-256M-f16.gguf"},
+                ]}).encode())
             return self._send(json.dumps({"siblings": [
                 {"rfilename": "modele-Q4_K_M.gguf"},
                 {"rfilename": "modele-Q8_0.gguf"},
@@ -315,3 +324,52 @@ class TestValidationDefensive:
 
         assert _absolute_url("https://reg.test", "/blobs/x") == "https://reg.test/blobs/x"
         assert _absolute_url("https://reg.test", "blobs/x") == "https://reg.test/blobs/x"
+
+
+class TestAppariementDuProjecteur:
+    """Le projecteur retenu doit correspondre à la quantification du poids choisi.
+
+    Défaut trouvé sur un vrai dépôt de vision (`ggml-org/SmolVLM-256M-Instruct-GGUF`, qui publie
+    un `mmproj` par quantification) : le projecteur était choisi par simple tri alphabétique,
+    indépendamment du fichier de poids retenu. Demander `:f16` livrait donc le modèle en f16 et
+    l'encodeur d'image en Q8_0 — sans que rien ne le signale.
+
+    Le résultat reste fonctionnel, `llama.cpp` acceptant un projecteur d'une autre précision, ce
+    qui rend le défaut d'autant plus pernicieux : la demande explicite de l'utilisateur est
+    silencieusement contredite. Un dépôt qui prend la peine de publier les deux variantes exprime
+    une intention ; la suivre est le comportement le moins surprenant.
+    """
+
+    def _artefacts(self, client_registre, reference):
+        """Résout un dépôt et renvoie `{rôle: nom de fichier}` sans rien télécharger."""
+        import asyncio
+
+        from ollamacpp import sources
+
+        service = client_registre.app.state.service
+        _, artefacts = asyncio.run(
+            sources._resolve_huggingface(service, reference[len("hf.co/"):])
+        )
+        return {role: spec["name"] for role, spec in artefacts.items()}
+
+    def test_f16_recoit_le_projecteur_f16(self, client_registre):
+        noms = self._artefacts(client_registre, "hf.co/org/multi:f16")
+        assert noms["model"] == "Vision-256M-f16.gguf"
+        assert noms["mmproj"] == "mmproj-Vision-256M-f16.gguf"
+
+    def test_q8_recoit_le_projecteur_q8(self, client_registre):
+        noms = self._artefacts(client_registre, "hf.co/org/multi:Q8_0")
+        assert noms["model"] == "Vision-256M-Q8_0.gguf"
+        assert noms["mmproj"] == "mmproj-Vision-256M-Q8_0.gguf"
+
+    def test_sans_precision_les_deux_restent_coherents(self, client_registre):
+        """Le choix par défaut doit rester apparié, pas seulement déterministe."""
+        noms = self._artefacts(client_registre, "hf.co/org/multi")
+        assert noms["model"].endswith("-Q8_0.gguf")
+        assert noms["mmproj"].endswith("-Q8_0.gguf")
+
+    def test_projecteur_unique_toujours_associe(self, client_registre):
+        """Contre-épreuve : un dépôt n'offrant qu'un projecteur l'associe quoi qu'il arrive."""
+        noms = self._artefacts(client_registre, "hf.co/org/depot:Q8_0")
+        assert noms["model"] == "modele-Q8_0.gguf"
+        assert noms["mmproj"] == "mmproj-f16.gguf"

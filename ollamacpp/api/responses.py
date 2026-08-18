@@ -44,7 +44,7 @@ from ..canonical import (
     link_tool_results,
 )
 from ..errors import BadRequest
-from .common import get_service, read_body
+from .common import get_service, read_body, reject_unsupported
 from .openai import parse_content, parse_sampling, parse_tool_choice, parse_tools
 
 router = APIRouter()
@@ -265,6 +265,7 @@ async def responses(request: Request):
     response_id = f"resp_{created}"
 
     async with service.lifecycle.acquire(model.name) as resident:
+        reject_unsupported(resident, canonical)
         upstream = backend.serialize_request(canonical, model_id=resident.name)
         client = resident.instance.client
 

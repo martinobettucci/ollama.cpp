@@ -56,3 +56,37 @@ def require_management(service: Service) -> None:
     """
     if not service.config.management_enabled:
         raise Forbidden("model management is disabled on this server")
+
+
+def reject_unsupported(resident, canonical, *, requested: str | None = None) -> None:
+    """Refuse une requête que le modèle chargé ne peut pas honorer, avec le message d'Ollama.
+
+    @spec docs/BACKLOG.md OC-032 « Détection de capacités observables », OC-044, OC-071, OC-074,
+          OC-075
+    @spec docs/ollama.cpp-architecture.md §5.7 « Capacités » ; mission §13
+
+    Les capacités viennent de `/props` du modèle **réellement en mémoire**, pas du manifest ni
+    d'une heuristique sur le chat template : c'est la seule source qui décrit ce que le runtime
+    sait faire à cet instant (OC-032).
+
+    Cette fonction est partagée par les quatre façades, et cette mutualisation est le correctif
+    d'un défaut trouvé sur un vrai modèle de vision : le contrôle n'existait que sur les façades
+    Ollama et OpenAI. Sur Responses et Anthropic, l'image atteignait `llama-server`, qui la
+    refusait ; le client recevait un `502` porteur d'un message d'amont conseillant de fournir un
+    projecteur. Un `502` annonce une panne du serveur là où la requête est simplement invalide, et
+    ce conseil s'adresse à l'exploitant, pas au client. Un garde-fou par façade est un garde-fou
+    qu'on oublie : il n'y en a plus qu'un.
+
+    `requested` permet de nommer le modèle tel que le client l'a demandé, plutôt que sous son nom
+    résolu — c'est ce que fait Ollama dans ses messages. À défaut, le nom du modèle résident.
+    """
+    nom = requested or resident.name
+    capabilities = resident.capabilities
+    if canonical.thinking.is_requested and "thinking" not in capabilities:
+        raise BadRequest(f'"{nom}" does not support thinking')
+    if canonical.tools and "tools" not in capabilities:
+        raise BadRequest(f'"{nom}" does not support tools')
+    if any(getattr(message, "images", ()) for message in canonical.messages) and (
+        "vision" not in capabilities
+    ):
+        raise BadRequest(f'"{nom}" does not support vision')

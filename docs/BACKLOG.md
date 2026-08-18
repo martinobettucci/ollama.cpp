@@ -69,7 +69,11 @@ les `@verifies` des tests. Ils ne sont jamais réutilisés ni renumérotés.
       `cache_type_k` / `cache_type_v`, draft model, mmproj, adaptateurs.*
 - [~] **OC-032** — Détection de capacités observables
       *Depuis `/props` (`modalities`, `chat_template_caps`), le manifest et les artefacts
-      présents. Jamais de capacité déclarée non observable.*
+      présents. Jamais de capacité déclarée non observable. `vision` est vérifiée par
+      l'observation : un vrai modèle multimodal décrit quatre couleurs distinctes, et un modèle
+      textuel refuse l'image en `400` sur les quatre façades. Le garde-fou est **partagé**
+      (`api/common.py::reject_unsupported`) après qu'un défaut eut montré qu'un contrôle dupliqué
+      par façade est un contrôle qu'on oublie.*
 - [~] **OC-033** — `ModelLifecycleManager`
       *États `NOT_PRESENT` → `FAILED`, single-flight, refus de `READY` si un artefact obligatoire
       manque.*
@@ -127,7 +131,10 @@ les `@verifies` des tests. Ils ne sont jamais réutilisés ni renumérotés.
       `Qwen/Qwen2.5-0.5B-Instruct-GGUF:q4_k_m` tiré en 37 s, 491 400 032 octets conformes à
       `x-linked-size`, digest recalculé localement, source tracée au manifest, puis chargement,
       génération juste, appel d'outil et boucle complète sur le modèle obtenu. Dépôt et fichier
-      inexistants refusés. Prérequis réseau documenté et mesuré par un test dédié.*
+      inexistants refusés. Prérequis réseau documenté et mesuré par un test dédié.
+      Vision : `ggml-org/SmolVLM-256M-Instruct-GGUF` tiré avec son projecteur, apparié à la
+      quantification du poids choisi ; le modèle décrit correctement quatre couleurs distinctes
+      sur les quatre façades et depuis le CLI officiel.*
 - [~] **OC-062** — Registre privé natif
       *URL, jeton, en-tête `Authorization`, checksums, cache local, installation atomique,
       reprise de téléchargement ; aucun secret journalisé (risque R9).*

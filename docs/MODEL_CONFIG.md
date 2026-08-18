@@ -75,6 +75,16 @@ déclaré mais absent du magasin empêche le modèle d'atteindre l'état `READY`
 multimodal sans son `mmproj` échoue au chargement plutôt que d'accepter des images qu'il ne peut
 pas traiter.
 
+Lors d'un `pull` depuis Hugging Face, le `mmproj` est retenu automatiquement et **apparié à la
+quantification** du fichier de poids choisi lorsque le dépôt en publie plusieurs. Vérifié sur
+`ggml-org/SmolVLM-256M-Instruct-GGUF` :
+
+| Référence tirée | `model` | `mmproj` |
+|---|---|---|
+| `hf.co/ggml-org/SmolVLM-256M-Instruct-GGUF` | `…-Q8_0.gguf` | `mmproj-…-Q8_0.gguf` |
+| `…-GGUF:f16` | `…-f16.gguf` | `mmproj-…-f16.gguf` |
+| `ggml-org/Qwen2-VL-2B-Instruct-GGUF:Q4_K_M` | `…-Q4_K_M.gguf` | `mmproj-…-Q8_0.gguf` (repli : aucun Q4_K_M publié) |
+
 ### 2.2 `capabilities_override` — restreindre, jamais accorder
 
 ```json

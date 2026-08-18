@@ -427,3 +427,141 @@ class TestResponses:
             "model": "qwen3:8b", "input": "x", "max_output_tokens": 32,
         })
         assert response.status_code == 200
+
+
+# --- Capacités : refus uniforme sur les quatre façades ---------------------------------------------
+
+
+class TestRefusDeVisionSurToutesLesFacades:
+    """Un modèle sans projecteur doit refuser une image **de la même façon** partout.
+
+    Défaut trouvé sur un vrai modèle de vision : le garde-fou n'existait que sur les façades
+    Ollama et OpenAI. Sur Responses et Anthropic, l'image atteignait `llama-server`, qui la
+    refusait — le client recevait alors un `502` portant un message d'amont
+    (« you may need to provide the mmproj… ») au lieu d'un `400` disant que le modèle ne sait pas
+    voir. Deux défauts en un : un code de statut faux, qui suggère une panne serveur là où la
+    requête est simplement invalide, et une fuite de détail d'implémentation vers le client.
+
+    Le résultat attendu est celui d'Ollama : `400`, et le message `does not support vision`.
+    """
+
+    IMAGE = ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQ"
+             "AAAABJRU5ErkJggg==")
+
+    @pytest.fixture
+    def sans_vision(self, client, installed):
+        """Modèle sans `mmproj` : ses capacités observées ne contiennent pas `vision`."""
+        install_model(installed, "texte-seul:v1", with_mmproj=False)
+        return "texte-seul:v1"
+
+    def test_ollama_refuse(self, client, sans_vision):
+        reponse = client.post("/api/chat", json={
+            "model": sans_vision, "stream": False,
+            "messages": [{"role": "user", "content": "Décris.", "images": [self.IMAGE]}]})
+        assert reponse.status_code == 400
+        assert "does not support vision" in reponse.json()["error"]
+
+    def test_openai_refuse(self, client, sans_vision):
+        reponse = client.post("/v1/chat/completions", json={
+            "model": sans_vision,
+            "messages": [{"role": "user", "content": [
+                {"type": "text", "text": "Décris."},
+                {"type": "image_url",
+                 "image_url": {"url": f"data:image/png;base64,{self.IMAGE}"}}]}]})
+        assert reponse.status_code == 400
+        assert "does not support vision" in reponse.json()["error"]
+
+    def test_responses_refuse(self, client, sans_vision):
+        reponse = client.post("/v1/responses", json={
+            "model": sans_vision,
+            "input": [{"role": "user", "content": [
+                {"type": "input_text", "text": "Décris."},
+                {"type": "input_image", "image_url": f"data:image/png;base64,{self.IMAGE}"}]}]})
+        assert reponse.status_code == 400, reponse.text
+        assert "does not support vision" in reponse.json()["error"]
+
+    def test_anthropic_refuse(self, client, sans_vision):
+        reponse = client.post("/v1/messages", json={
+            "model": sans_vision, "max_tokens": 16,
+            "messages": [{"role": "user", "content": [
+                {"type": "text", "text": "Décris."},
+                {"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                             "data": self.IMAGE}}]}]})
+        assert reponse.status_code == 400, reponse.text
+        assert "does not support vision" in reponse.json()["error"]
+
+    def test_aucun_message_damont_ne_fuit(self, client, sans_vision):
+        """Le client ne doit jamais voir un conseil destiné à l'exploitant du serveur."""
+        for chemin, corps in (
+            ("/v1/responses", {"model": sans_vision, "input": [{"role": "user", "content": [
+                {"type": "input_image", "image_url": f"data:image/png;base64,{self.IMAGE}"}]}]}),
+            ("/v1/messages", {"model": sans_vision, "max_tokens": 16,
+                              "messages": [{"role": "user", "content": [
+                                  {"type": "image", "source": {"type": "base64",
+                                                               "media_type": "image/png",
+                                                               "data": self.IMAGE}}]}]}),
+        ):
+            texte = client.post(chemin, json=corps).text
+            assert "mmproj" not in texte, f"{chemin} divulgue un détail d'amont : {texte[:120]}"
+
+    def test_avec_projecteur_la_meme_requete_passe(self, client, installed):
+        """Contre-épreuve : le refus doit venir de la capacité, pas du chemin de l'image."""
+        install_model(installed, "avec-vision:v1", with_mmproj=True)
+        for chemin, corps in (
+            ("/v1/responses", {"model": "avec-vision:v1", "input": [{"role": "user", "content": [
+                {"type": "input_text", "text": "Décris."},
+                {"type": "input_image", "image_url": f"data:image/png;base64,{self.IMAGE}"}]}]}),
+            ("/v1/messages", {"model": "avec-vision:v1", "max_tokens": 16,
+                              "messages": [{"role": "user", "content": [
+                                  {"type": "text", "text": "Décris."},
+                                  {"type": "image", "source": {"type": "base64",
+                                                               "media_type": "image/png",
+                                                               "data": self.IMAGE}}]}]}),
+        ):
+            reponse = client.post(chemin, json=corps)
+            assert reponse.status_code == 200, f"{chemin} : {reponse.text[:150]}"
+
+
+class TestRefusDoutilsSurToutesLesFacades:
+    """Même exigence pour les outils : un modèle sans `tools` refuse partout de la même façon."""
+
+    OUTIL_OPENAI = {"type": "function", "function": {
+        "name": "f", "description": "", "parameters": {"type": "object", "properties": {}}}}
+
+    @pytest.fixture
+    def sans_outils(self, client, installed, monkeypatch):
+        monkeypatch.setenv("FAKE_LLAMA_TOOLS", "0")
+        install_model(installed, "sans-outils:v1")
+        return "sans-outils:v1"
+
+    def test_ollama_refuse(self, client, sans_outils):
+        reponse = client.post("/api/chat", json={
+            "model": sans_outils, "stream": False, "tools": [self.OUTIL_OPENAI],
+            "messages": [{"role": "user", "content": "Bonjour"}]})
+        assert reponse.status_code == 400
+        assert "does not support tools" in reponse.json()["error"]
+
+    def test_openai_refuse(self, client, sans_outils):
+        reponse = client.post("/v1/chat/completions", json={
+            "model": sans_outils, "tools": [self.OUTIL_OPENAI],
+            "messages": [{"role": "user", "content": "Bonjour"}]})
+        assert reponse.status_code == 400
+        assert "does not support tools" in reponse.json()["error"]
+
+    def test_responses_refuse(self, client, sans_outils):
+        reponse = client.post("/v1/responses", json={
+            "model": sans_outils,
+            "tools": [{"type": "function", "name": "f", "description": "",
+                       "parameters": {"type": "object", "properties": {}}}],
+            "input": [{"role": "user", "content": "Bonjour"}]})
+        assert reponse.status_code == 400, reponse.text
+        assert "does not support tools" in reponse.json()["error"]
+
+    def test_anthropic_refuse(self, client, sans_outils):
+        reponse = client.post("/v1/messages", json={
+            "model": sans_outils, "max_tokens": 16,
+            "tools": [{"name": "f", "description": "",
+                       "input_schema": {"type": "object", "properties": {}}}],
+            "messages": [{"role": "user", "content": "Bonjour"}]})
+        assert reponse.status_code == 400, reponse.text
+        assert "does not support tools" in reponse.json()["error"]

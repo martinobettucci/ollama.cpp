@@ -111,13 +111,15 @@ redirections. Un miroir interne se déclare en pointant cette variable vers lui.
 ## État du projet
 
 Les quatre façades, le registre, le cycle de vie, l'ordonnanceur et le téléchargement sont
-implémentés et couverts par 746 tests, dont des tests d'API de bout en bout et une suite de
+implémentés et couverts par 775 tests, dont des tests d'API de bout en bout et une suite de
 conformité rejouant la logique d'`ollama-gateway`.
 
 La chaîne est vérifiée de bout en bout sur un **vrai `llama-server`** compilé depuis l'upstream,
 avec le **vrai binaire `ollama`** comme client, et sur un **vrai modèle entraîné** —
 `Qwen/Qwen2.5-0.5B-Instruct-GGUF` téléchargé depuis Hugging Face par `/api/pull` — qui répond
-juste, appelle des outils et boucle sur leurs résultats.
+juste, appelle des outils et boucle sur leurs résultats. La vision est vérifiée de la même
+manière, sur `ggml-org/SmolVLM-256M-Instruct-GGUF` et son projecteur : le modèle décrit
+correctement quatre couleurs distinctes, sur les quatre façades et depuis le CLI officiel.
 
 L'état réel, unité par unité, est tenu dans **`docs/BACKLOG.md`**, qui fait foi — une unité n'y
 passe `[x]` qu'après validation complète de sa Definition of Done.
@@ -159,6 +161,7 @@ cmake --build build --target llama-server -j"$(nproc)"
 | `python -m ollamacpp` | lancement direct, sans conteneur |
 | `python scripts/seed.py --verify` | installe un modèle de démonstration et vérifie l'inférence |
 | `python scripts/make_test_model.py --output m.gguf` | génère un vrai GGUF minuscule, sans téléchargement |
+| `python scripts/make_test_image.py --output i.png --forme disque --couleur bleu` | génère une image de test pour vérifier la vision |
 | `pytest` | suite de tests (les tests marqués `e2e` sont ignorés sans binaire amont) |
 | `pytest -m conformance` | conformité vis-à-vis d'`ollama-gateway` uniquement |
 | `OLLAMACPP_TEST_LLAMA_SERVER=/chemin/llama-server pytest -m e2e` | bout en bout sur le vrai `llama-server` et un vrai modèle |
@@ -203,6 +206,7 @@ ollamacpp/
 tests/             unitaires, intégration, API, conformité, contrat llama-server, pull HF réel
 scripts/seed.py            données de démonstration, via les vraies API
 scripts/make_test_model.py modèle GGUF de test, réellement chargeable
+scripts/make_test_image.py images PNG de test, sans dépendance externe
 docs/
   ollama.cpp-architecture.md   document fondateur : audit, matrice, plan, risques
   DAT.md                       dossier d'architecture technique

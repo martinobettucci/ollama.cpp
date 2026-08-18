@@ -279,3 +279,202 @@ def test_la_redirection_vers_lhote_de_stockage_est_bien_suivie():
         f"hôte de stockage inaccessible ({finale.status_code}) : autoriser le domaine de "
         f"{cible.split('/')[2]} en sortie — voir README, « Accès réseau requis »")
     assert int(finale.headers.get("content-length", 0)) == TAILLE_ATTENDUE
+
+
+# --- Vision : modèle multimodal réel, projecteur réel ------------------------------------------
+
+
+#: Dépôt de vision de référence : 256 M de paramètres, publié par l'équipe de `llama.cpp`, avec un
+#: `mmproj` **par quantification** — ce qui en fait aussi le cas d'appariement du projecteur.
+REPO_VISION = "hf.co/ggml-org/SmolVLM-256M-Instruct-GGUF"
+
+
+@pytest.fixture(scope="module")
+def service_vision(tmp_path_factory):
+    """Service dédié : le modèle de vision et le modèle texte cohabitent pour la contre-épreuve."""
+    if not ACTIVE or LLAMA_SERVER is None:
+        pytest.skip("environnement incomplet")
+
+    from fastapi.testclient import TestClient
+
+    from ollamacpp.app import create_app
+    from ollamacpp.config import Config
+
+    config = Config(
+        models_dir=tmp_path_factory.mktemp("vision"),
+        llama_server_bin=LLAMA_SERVER,
+        llama_server_port_min=19700,
+        llama_server_port_max=19799,
+        default_context=4096,
+        load_timeout_s=240.0,
+    )
+    with TestClient(create_app(config)) as client:
+        for reference in (REPO_VISION, MODELE):
+            reponse = client.post("/api/pull", json={"model": reference, "stream": False},
+                                  timeout=1800)
+            assert reponse.status_code == 200, reponse.text
+        yield client
+
+
+def image_png(couleur: str, forme: str = "disque") -> str:
+    """Génère une image de test et renvoie sa représentation base64.
+
+    Les images sont **fabriquées ici** plutôt que versionnées : une couleur ne peut pas être
+    devinée par un modèle qui ne verrait pas l'image, ce qui fait de la réponse une observation et
+    non une coïncidence.
+    """
+    import base64
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from scripts.make_test_image import FORMES
+
+    return base64.b64encode(FORMES[forme](couleur, 224)).decode()
+
+
+@besoin_hf
+class TestProjecteurMultimodal:
+    """Le `mmproj` est-il téléchargé, apparié, et réellement utilisé ?"""
+
+    def test_les_deux_artefacts_sont_installes(self, service_vision):
+        """Un modèle de vision n'est complet qu'avec son projecteur."""
+        installe = service_vision.app.state.service.registry.get(REPO_VISION)
+        assert installe.manifest.artifacts.model
+        assert installe.manifest.artifacts.mmproj, "le projecteur n'a pas été associé"
+
+    def test_le_projecteur_correspond_a_la_quantification_du_modele(self, service_vision):
+        """Ce dépôt publie un `mmproj` par quantification : les deux doivent être appariés."""
+        import asyncio
+
+        from ollamacpp import sources
+
+        service = service_vision.app.state.service
+        _, artefacts = asyncio.run(
+            sources._resolve_huggingface(service, "ggml-org/SmolVLM-256M-Instruct-GGUF:f16")
+        )
+        assert artefacts["model"]["name"].endswith("-f16.gguf")
+        assert artefacts["mmproj"]["name"].endswith("-f16.gguf"), (
+            f"projecteur dépareillé : {artefacts['mmproj']['name']}")
+
+    def test_la_capacite_vision_est_annoncee(self, service_vision):
+        capacites = service_vision.post("/api/show",
+                                        json={"model": REPO_VISION}).json()["capabilities"]
+        assert "vision" in capacites
+
+    @pytest.mark.parametrize("couleur, attendu", [
+        ("rouge", "red"), ("bleu", "blue"), ("vert", "green"), ("jaune", "yellow"),
+    ])
+    def test_le_modele_decrit_la_couleur_reelle(self, service_vision, couleur, attendu):
+        """Preuve que l'image traverse le projecteur : une couleur ne se devine pas.
+
+        C'est la vérification qu'exige la mission (§13) : la capacité `vision` ne doit pas être
+        annoncée sur la foi d'un fichier présent, mais parce que le modèle a effectivement décrit
+        une image. Quatre couleurs distinctes rendent le hasard négligeable.
+        """
+        reponse = service_vision.post("/api/chat", json={
+            "model": REPO_VISION, "stream": False,
+            "options": {"temperature": 0, "seed": 3, "num_predict": 12},
+            "messages": [{"role": "user", "content": "What color is the shape in this image?",
+                          "images": [image_png(couleur)]}],
+        }, timeout=600)
+        assert reponse.status_code == 200, reponse.text
+        contenu = reponse.json()["message"]["content"]
+        assert attendu in contenu.lower(), f"attendu {attendu!r}, obtenu {contenu!r}"
+
+    def test_les_quatre_facades_voient_la_meme_image(self, service_vision):
+        """Le même disque bleu, soumis par les quatre protocoles, doit donner la même lecture."""
+        image = image_png("bleu")
+        uri = f"data:image/png;base64,{image}"
+        question = "What color is the shape in this image?"
+
+        reponses = {
+            "ollama": service_vision.post("/api/chat", json={
+                "model": REPO_VISION, "stream": False,
+                "options": {"temperature": 0, "seed": 3, "num_predict": 12},
+                "messages": [{"role": "user", "content": question, "images": [image]}],
+            }, timeout=600).json()["message"]["content"],
+
+            "openai": service_vision.post("/v1/chat/completions", json={
+                "model": REPO_VISION, "temperature": 0, "seed": 3, "max_tokens": 12,
+                "messages": [{"role": "user", "content": [
+                    {"type": "text", "text": question},
+                    {"type": "image_url", "image_url": {"url": uri}}]}],
+            }, timeout=600).json()["choices"][0]["message"]["content"],
+        }
+
+        corps = service_vision.post("/v1/responses", json={
+            "model": REPO_VISION, "temperature": 0, "max_output_tokens": 12,
+            "input": [{"role": "user", "content": [
+                {"type": "input_text", "text": question},
+                {"type": "input_image", "image_url": uri}]}],
+        }, timeout=600).json()
+        reponses["responses"] = "".join(
+            bloc["text"] for item in corps["output"] for bloc in item.get("content", [])
+            if bloc.get("type") == "output_text")
+
+        corps = service_vision.post("/v1/messages", json={
+            "model": REPO_VISION, "max_tokens": 12, "temperature": 0,
+            "messages": [{"role": "user", "content": [
+                {"type": "text", "text": question},
+                {"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                             "data": image}}]}],
+        }, timeout=600).json()
+        reponses["anthropic"] = "".join(
+            bloc.get("text", "") for bloc in corps["content"] if bloc.get("type") == "text")
+
+        for facade, texte in reponses.items():
+            assert "blue" in texte.lower(), f"{facade} : {texte!r}"
+
+
+@besoin_hf
+class TestRefusDeVisionSurUnVraiModeleTexte:
+    """Contre-épreuve sur un modèle réel sans projecteur : refus propre, sur les quatre façades.
+
+    Défaut trouvé par ce test : le garde-fou n'existait que sur les façades Ollama et OpenAI.
+    Responses et Anthropic laissaient l'image atteindre `llama-server`, dont le refus remontait en
+    `502` accompagné d'un conseil destiné à l'exploitant (« you may need to provide the mmproj »).
+    Un `502` désigne une panne du serveur, alors que la requête est simplement invalide.
+    """
+
+    def _image(self):
+        return image_png("bleu")
+
+    def test_ollama(self, service_vision):
+        reponse = service_vision.post("/api/chat", json={
+            "model": MODELE, "stream": False,
+            "messages": [{"role": "user", "content": "Describe.", "images": [self._image()]}]},
+            timeout=600)
+        assert reponse.status_code == 400
+        assert "does not support vision" in reponse.json()["error"]
+
+    def test_openai(self, service_vision):
+        reponse = service_vision.post("/v1/chat/completions", json={
+            "model": MODELE, "messages": [{"role": "user", "content": [
+                {"type": "text", "text": "Describe."},
+                {"type": "image_url",
+                 "image_url": {"url": f"data:image/png;base64,{self._image()}"}}]}]},
+            timeout=600)
+        assert reponse.status_code == 400
+        assert "does not support vision" in reponse.json()["error"]
+
+    def test_responses(self, service_vision):
+        reponse = service_vision.post("/v1/responses", json={
+            "model": MODELE, "input": [{"role": "user", "content": [
+                {"type": "input_text", "text": "Describe."},
+                {"type": "input_image",
+                 "image_url": f"data:image/png;base64,{self._image()}"}]}]},
+            timeout=600)
+        assert reponse.status_code == 400, reponse.text
+        assert "does not support vision" in reponse.json()["error"]
+        assert "mmproj" not in reponse.text
+
+    def test_anthropic(self, service_vision):
+        reponse = service_vision.post("/v1/messages", json={
+            "model": MODELE, "max_tokens": 16, "messages": [{"role": "user", "content": [
+                {"type": "text", "text": "Describe."},
+                {"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                             "data": self._image()}}]}]},
+            timeout=600)
+        assert reponse.status_code == 400, reponse.text
+        assert "does not support vision" in reponse.json()["error"]
+        assert "mmproj" not in reponse.text
