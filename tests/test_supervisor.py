@@ -166,3 +166,53 @@ class TestArret:
         await supervisor.terminate(instance)
         await asyncio.sleep(0.3)
         assert allocate_port("127.0.0.1", port, port) == port
+
+class TestDrainageDesTubes:
+    """Les tubes du fils sont vidés en continu, sans quoi `llama-server` se bloque.
+
+    Un `PIPE` que personne ne lit se remplit (64 Kio sous Linux) et le fils se bloque sur son
+    prochain `write` — génération comprise. Le symptôme est trompeur : le modèle répond, mais
+    quinze fois trop lentement, et seulement pour les configurations bavardes (décodage
+    spéculatif, qui journalise à chaque brouillon). Mesuré sur un cas réel : 2,2 tok/s tube plein
+    contre 33,9 tok/s drainé.
+    """
+
+    async def test_une_instance_tres_bavarde_ne_se_bloque_pas(self, supervisor, modele_factice,
+                                                              monkeypatch):
+        """Bien plus d'un tampon de tube écrit sur la sortie : l'instance reste interrogeable."""
+        monkeypatch.setenv("FAKE_LLAMA_LOG_BYTES", "400000")
+        instance = await supervisor.spawn(
+            name="bavard", model_path=modele_factice, runtime=RuntimeConfig(),
+        )
+        try:
+            # Si les tubes n'étaient pas drainés, le fils serait bloqué et ne répondrait plus.
+            reponse = await instance.client.get("/health", timeout=5.0)
+            assert reponse.status_code == 200
+            assert instance.is_running
+        finally:
+            await supervisor.terminate(instance)
+
+    async def test_le_journal_conserve_est_borne(self, supervisor, modele_factice, monkeypatch):
+        """Le tampon de diagnostic garde la FIN du journal, sans croître indéfiniment."""
+        from ollamacpp.runtime.supervisor import _LOG_TAIL_LINES
+        monkeypatch.setenv("FAKE_LLAMA_LOG_BYTES", "400000")
+        instance = await supervisor.spawn(
+            name="bavard", model_path=modele_factice, runtime=RuntimeConfig(),
+        )
+        try:
+            await asyncio.sleep(0.3)
+            assert len(instance.log_tail) <= _LOG_TAIL_LINES
+        finally:
+            await supervisor.terminate(instance)
+
+    async def test_les_taches_de_drainage_sont_annulees_a_l_arret(self, supervisor,
+                                                                 modele_factice):
+        """Aucune tâche ne survit à l'instance : sinon elles s'accumuleraient à chaque bascule."""
+        instance = await supervisor.spawn(
+            name="qwen3:8b", model_path=modele_factice, runtime=RuntimeConfig()
+        )
+        assert instance.drains and all(not t.done() for t in instance.drains)
+        await supervisor.terminate(instance)
+        await asyncio.sleep(0.1)
+        assert all(t.done() for t in instance.drains)
+

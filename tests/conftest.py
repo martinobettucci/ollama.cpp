@@ -127,7 +127,7 @@ def install_model(
 def fake_server_env(monkeypatch):
     """Neutralise les variables de simulation du faux serveur entre deux tests."""
     for name in ("FAKE_LLAMA_EXIT_CODE", "FAKE_LLAMA_START_DELAY", "FAKE_LLAMA_VISION",
-                 "FAKE_LLAMA_TOOLS", "FAKE_LLAMA_THINKING"):
+                 "FAKE_LLAMA_TOOLS", "FAKE_LLAMA_THINKING", "FAKE_LLAMA_LOG_BYTES"):
         monkeypatch.delenv(name, raising=False)
 
 

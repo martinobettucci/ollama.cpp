@@ -25,7 +25,9 @@ Variables d'environnement de simulation :
 - `FAKE_LLAMA_START_DELAY`: secondes avant d'écouter (chargement lent, dépassement de délai) ;
 - `FAKE_LLAMA_VISION`     : `1` pour annoncer `modalities.vision` ;
 - `FAKE_LLAMA_TOOLS`      : `0` pour un template sans support d'outils ;
-- `FAKE_LLAMA_THINKING`   : `1` pour un template gérant le raisonnement.
+- `FAKE_LLAMA_THINKING`   : `1` pour un template gérant le raisonnement ;
+- `FAKE_LLAMA_LOG_BYTES`  : écrit ce volume sur stdout/stderr avant d'écouter, pour éprouver le
+  drainage des tubes par le superviseur (un `PIPE` non lu bloque le fils dès 64 Kio).
 """
 
 from __future__ import annotations
@@ -300,6 +302,18 @@ def main() -> int:
     delay = float(os.environ.get("FAKE_LLAMA_START_DELAY") or 0)
     if delay:
         time.sleep(delay)
+
+    # Déluge de journal : reproduit un amont bavard (décodage spéculatif, journalisation par
+    # brouillon). Sans drainage côté superviseur, l'écriture ci-dessous BLOQUE et le serveur
+    # n'écoute jamais — exactement la panne que ce mécanisme doit empêcher.
+    volume = int(os.environ.get("FAKE_LLAMA_LOG_BYTES") or 0)
+    if volume:
+        ligne = "x" * 120
+        for flux in (sys.stdout, sys.stderr):
+            ecrit = 0
+            while ecrit < volume:
+                print(ligne, file=flux, flush=True)
+                ecrit += len(ligne) + 1
 
     server = ThreadingHTTPServer((OPTIONS.host, OPTIONS.port), Handler)
     server.daemon_threads = True

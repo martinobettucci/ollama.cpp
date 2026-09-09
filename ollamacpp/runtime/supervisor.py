@@ -27,6 +27,7 @@ import os
 import signal
 import socket
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -44,6 +45,10 @@ _HEALTH_POLL_INTERVAL_S = 0.1
 #: Délai laissé à une instance pour s'arrêter proprement avant `SIGKILL`.
 _TERMINATE_GRACE_S = 10.0
 
+#: Nombre de lignes de journal conservées par instance, pour le diagnostic d'un échec de
+#: chargement. Borne mémoire : les lignes plus anciennes sont oubliées au fil de l'eau.
+_LOG_TAIL_LINES = 40
+
 
 @dataclass(slots=True)
 class LlamaServerInstance:
@@ -57,6 +62,11 @@ class LlamaServerInstance:
     started_at: float
     args: list[str] = field(default_factory=list)
     props: dict = field(default_factory=dict)
+    #: Fin du journal de l'instance (stdout + stderr confondus), alimentée en continu par les
+    #: tâches de drainage. Sert au diagnostic d'un échec de chargement.
+    log_tail: deque[str] = field(default_factory=lambda: deque(maxlen=_LOG_TAIL_LINES))
+    #: Tâches qui vident les tubes du fils. Annulées à l'arrêt de l'instance.
+    drains: list[asyncio.Task] = field(default_factory=list)
 
     @property
     def pid(self) -> int:
@@ -172,6 +182,15 @@ class LlamaServerSupervisor:
             started_at=started_at,
             args=args,
         )
+        # Les tubes du fils DOIVENT être vidés en continu. Un `PIPE` que personne ne lit se
+        # remplit (64 Kio sous Linux) et `llama-server` se bloque alors sur son prochain `write`
+        # — génération comprise. Le symptôme est trompeur : le modèle répond, mais quinze fois
+        # trop lentement, et seulement pour les configurations bavardes (décodage spéculatif, qui
+        # journalise à chaque brouillon). Mesuré : 2,2 tok/s tube plein contre 33,9 tok/s drainé.
+        instance.drains = [
+            asyncio.create_task(self._drain(process.stdout, instance)),
+            asyncio.create_task(self._drain(process.stderr, instance)),
+        ]
 
         try:
             await self._await_health(instance)
@@ -217,23 +236,40 @@ class LlamaServerSupervisor:
             f"for model '{instance.name}'"
         )
 
+    @staticmethod
+    async def _drain(stream, instance: LlamaServerInstance) -> None:
+        """Vide un tube du fils en continu, en gardant la fin du journal.
+
+        Deux rôles, indissociables : empêcher le blocage sur tube plein, et conserver de quoi
+        diagnostiquer un échec. Lire à la demande ne suffirait pas — le fils serait déjà bloqué
+        avant qu'on ait une raison de lire."""
+        if stream is None:
+            return
+        with contextlib.suppress(asyncio.CancelledError, ValueError, OSError):
+            while True:
+                line = await stream.readline()
+                if not line:                      # EOF : le fils a fermé le tube
+                    return
+                text = line.decode("utf-8", errors="replace").rstrip()
+                if text:
+                    instance.log_tail.append(text)
+
     async def _read_failure_output(self, instance: LlamaServerInstance) -> str:
-        """Récupère la fin de `stderr` pour rendre un échec de chargement diagnosticable.
+        """Fin du journal de l'instance, pour rendre un échec de chargement diagnosticable.
 
         Sans cela, un modèle qui ne charge pas produirait un simple code de sortie, impossible à
         interpréter — exactement le genre d'erreur muette que la règle §18 interdit.
+
+        Le journal vient du tampon alimenté par `_drain` : au moment où l'on veut diagnostiquer,
+        le fils est mort et ses tubes sont fermés — il n'y aurait plus rien à y lire.
         """
-        try:
-            if instance.process.stderr is None:
-                return ""
-            data = await asyncio.wait_for(instance.process.stderr.read(4096), timeout=2.0)
-        except (asyncio.TimeoutError, ValueError, OSError):
+        # Laisse aux tâches de drainage le temps d'absorber les dernières lignes avant l'EOF.
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(asyncio.gather(*instance.drains, return_exceptions=True),
+                                   timeout=2.0)
+        if not instance.log_tail:
             return ""
-        text = data.decode("utf-8", errors="replace").strip()
-        if not text:
-            return ""
-        last_lines = " / ".join(text.splitlines()[-3:])
-        return f": {last_lines}"
+        return ": " + " / ".join(list(instance.log_tail)[-3:])
 
     async def fetch_props(self, instance: LlamaServerInstance) -> dict:
         """Lit `GET /props`, source de vérité des capacités et du contexte effectif (OC-032)."""
@@ -249,6 +285,11 @@ class LlamaServerSupervisor:
         """Arrête une instance : `SIGTERM`, puis `SIGKILL` si elle s'obstine. Idempotent."""
         with contextlib.suppress(Exception):
             await instance.client.aclose()
+
+        # Les tâches de drainage se terminent d'elles-mêmes sur EOF ; on les annule ici pour le
+        # cas où le fils survivrait à son tube (enfant orphelin tenant l'extrémité d'écriture).
+        for task in instance.drains:
+            task.cancel()
 
         if instance.process.returncode is not None:
             return

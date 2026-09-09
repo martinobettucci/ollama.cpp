@@ -4,6 +4,21 @@ Toutes les modifications notables de `ollama.cpp`.
 
 ## [Non publié]
 
+### Corrigé
+
+- **Les tubes de `llama-server` sont drainés en continu.** `stdout` et `stderr` étaient ouverts en
+  `PIPE` sans jamais être lus — seul un échec de chargement en consommait 4 Kio. Un tube que
+  personne ne vide se remplit (64 Kio sous Linux) et le fils se bloque alors sur son prochain
+  `write`, génération comprise. Le symptôme est trompeur : le modèle répond, mais des dizaines de
+  fois trop lentement, et uniquement pour les configurations bavardes — un décodage spéculatif
+  journalise à chaque brouillon. Mesuré sur Qwen3.8 27B avec DFlash2 : **2,2 tok/s tube plein
+  contre 33,9 tok/s drainé**, à configuration identique.
+
+  Deux tâches vident désormais les deux flux dès le démarrage de l'instance et en conservent la
+  fin dans un tampon circulaire borné (40 lignes). Le diagnostic d'échec de chargement y puise :
+  au moment où l'on veut lire, le fils est mort et ses tubes sont fermés — il n'y aurait plus rien
+  à récupérer. Les tâches sont annulées à l'arrêt de l'instance.
+
 ### Ajouté
 
 - Document d'architecture fondateur `docs/ollama.cpp-architecture.md` : audit de `llama-server`,
