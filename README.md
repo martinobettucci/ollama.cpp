@@ -1,283 +1,272 @@
-# P2Enjoy Software Factory Base
+# ollama.cpp
 
-Reusable engineering baseline for P2Enjoy software projects.
+**Middleware de remplacement compatible Ollama, adossé à `llama-server`.**
 
-This repository is not an application starter and does not impose a product architecture. It provides the global engineering rules, documentation contracts, UI conventions, scheduled worker workflow and multi stack repository defaults used to bootstrap a reproducible software project.
-
-The factory is built around a strict separation:
-
-1. **Global rules** are reusable across projects and must remain independent of any product.
-2. **Project rules** live in companion files inside the target repository and contain the local architecture, terminology, commands, constraints, evidence and exceptions.
-
-## Repository contents
+`ollama.cpp` permet de remplacer Ollama par `llama-server` sans casser les clients, outils et
+services qui parlent aujourd'hui à Ollama, tout en donnant accès aux capacités avancées de
+`llama.cpp` qu'Ollama masque (types de cache K/V, Flash Attention, `tensor-split`, decoding
+spéculatif, contexte et parallélisme par modèle).
 
 ```text
-.
-├── .gitignore
-├── CLAUDE.md
-├── LICENSE
-├── README.md
-└── docs/
-    ├── .routine
-    ├── CloudWorker.md
-    └── DESIGN_SYSTEM.md
+Clients
+    ↓
+ollama-gateway        clés API, quotas, targets, routage, usage
+    ↓
+ollama.cpp            registry, manifests, lifecycle, scheduler, façades d'API
+    ↓
+llama-server          HTTP d'inférence, slots, batching, chat templates
+    ↓
+llama.cpp             inférence, GGUF, tokenizer, KV cache, GPU
 ```
 
-This base intentionally contains policy and orchestration documentation rather than application source code.
+## Objectif
 
-## Core files
-
-### `CLAUDE.md`
-
-Global engineering contract for AI assisted development sessions.
-
-It defines reusable rules for:
-
-- repository analysis before modification;
-- architecture and maintainability;
-- documentation and specification traceability;
-- Git discipline;
-- testing and E2E validation;
-- visual verification;
-- security and production safeguards;
-- deterministic development data;
-- deployment documentation;
-- observability and performance;
-- Definition of Done.
-
-`CLAUDE.md` must remain project agnostic.
-
-Any instruction that requires knowledge of the current repository belongs in the local companion:
-
-```text
-CLAUDE_PROJECT.md
-```
-
-### `docs/DESIGN_SYSTEM.md`
-
-Global P2Enjoy UI and UX reference.
-
-It defines reusable conventions for design tokens, typography, spacing, components, navigation, responsive behavior, accessibility, forms, tables, interaction states, focus management and visual verification.
-
-It must never contain product names, business entities, local screen structures, ticket identifiers, project measurements, local evidence or application specific exceptions.
-
-Projects with an interface create the companion:
-
-```text
-docs/DESIGN_SYSTEM_APP.md
-```
-
-That file contains the UI decisions that only make sense for the current product.
-
-### `docs/CloudWorker.md`
-
-Execution contract for a scheduled worker operating on an ephemeral checkout.
-
-It defines the lifecycle of a work session, including:
-
-- Git recovery and synchronization;
-- continuous persistence through commits and pushes;
-- environment initialization;
-- project stack startup and seed application;
-- selection of one coherent backlog unit;
-- specification before implementation;
-- targeted proofs during development;
-- end of session verification;
-- documentation and backlog synchronization;
-- final Git state checks.
-
-The worker method is global. Application commands are not.
-
-Exact commands for installation, startup, seed, tests and build must come from the target project's `README.md`, build files or scripts.
-
-### `docs/.routine`
-
-Small scheduled task entrypoint.
-
-It directs the worker to load `docs/CloudWorker.md` and `CLAUDE.md` before starting project work. This keeps the scheduled prompt small while the full contract remains version controlled.
-
-### `.gitignore`
-
-Generic ignore baseline for common generated artifacts from:
-
-- Python;
-- C and C++;
-- Node.js;
-- Deno;
-- CMake, Ninja and Meson;
-- test and coverage tooling;
-- local environments and secrets;
-- editors, operating systems and runtime temporary files.
-
-Important source configuration and lockfiles remain versionable.
-
-## Global versus project specific files
-
-| Global reference | Local companion | Responsibility |
-| --- | --- | --- |
-| `CLAUDE.md` | `CLAUDE_PROJECT.md` | Global engineering rules versus repository specific instructions |
-| `docs/DESIGN_SYSTEM.md` | `docs/DESIGN_SYSTEM_APP.md` | Shared UI system versus product specific UI decisions |
-| `docs/CloudWorker.md` | `README.md`, build files, scripts | Worker method versus executable project commands |
-
-A rule belongs in a global file only when it can be understood and reused without knowing the current product.
-
-Project specific information includes, for example:
-
-- product or service names;
-- business terminology;
-- repository specific commands and paths;
-- service names and deployment topology;
-- screen or route structures;
-- seed data and demonstration accounts;
-- backlog or ticket identifiers;
-- environment specific constraints;
-- measured values and local evidence;
-- justified exceptions to a global rule.
-
-## Starting a project
-
-Use this repository as the baseline for a new project, then add the specification and execution layer for the actual product.
+Qu'une cible `Ollama` puisse être remplacée par une cible `ollama.cpp` **sans modification du
+client**, et notamment sans aucune modification d'`ollama-gateway` :
 
 ```bash
-git clone https://github.com/P2Enjoy/software-factory-base.git my-project
-cd my-project
+OLLAMA_HOST=http://localhost:11434 ollama list
 ```
 
-The project should then establish its own operational documentation.
-
-A typical structure is:
+et simultanément, sur les mêmes modèles et le même runtime :
 
 ```text
-README.md
-CHANGELOG.md
-CLAUDE_PROJECT.md                 # when local agent rules exist
+POST /api/chat              (Ollama natif)
+POST /v1/chat/completions   (OpenAI)
+POST /v1/responses          (OpenAI Responses)
+POST /v1/messages           (Anthropic Messages)
+```
 
+## Ce que `ollama.cpp` n'est pas
+
+* **Pas un moteur d'inférence.** L'inférence, le GGUF, la tokenisation, les chat templates, le KV
+  cache, l'offload GPU, la Flash Attention, le multimodal, le decoding spéculatif, les slots, le
+  batching et le sampling restent la responsabilité de `llama.cpp` / `llama-server`.
+* **Pas un fork de `llama.cpp`.** Aucune ligne de `llama.cpp` n'est modifiée : `ollama.cpp` pilote
+  le binaire `llama-server` par ligne de commande et par HTTP.
+* **Pas une passerelle.** Clés API, quotas, targets, contrôle d'accès aux modèles, routage,
+  endpoints VS Code, suivi d'usage et administration restent la responsabilité
+  d'`ollama-gateway`.
+
+## Ce que `ollama.cpp` ajoute
+
+Registre de modèles, manifests, téléchargement et registre privé, cycle de vie des modèles
+(chargement, déchargement, `keep_alive`), ordonnancement conscient de la mémoire, détection de
+capacités, et les trois familles d'API ci-dessus au-dessus d'une représentation conversationnelle
+canonique unique.
+
+## Stack
+
+| Élément             | Choix                                         |
+| ------------------- | --------------------------------------------- |
+| Langage             | Python 3.11                                   |
+| Framework HTTP      | FastAPI / Starlette / uvicorn                 |
+| Client amont        | httpx                                         |
+| Tests               | pytest, pytest-asyncio                        |
+| Backend d'inférence | binaire `llama-server` (externe, non modifié) |
+| Conteneurisation    | Docker + Compose (dev / staging / prod)       |
+
+Les versions de dépendances sont alignées sur celles d'`ollama-gateway` pour éviter deux
+écosystèmes divergents dans la même chaîne. Justification et compromis :
+`docs/ollama.cpp-architecture.md` §5.2.
+
+## Prérequis
+
+* Python 3.11 ou plus récent
+* Un binaire `llama-server` accessible (compilé depuis `llama.cpp` ou fourni par l'image Docker)
+* Docker et Docker Compose pour les environnements conteneurisés
+
+### Accès réseau requis par `pull` depuis Hugging Face
+
+Autoriser `huggingface.co` **ne suffit pas**. Ce domaine ne sert que l'API de métadonnées et la
+route `/{dépôt}/resolve/{révision}/{fichier}` ; celle-ci répond **302** vers un hôte de stockage
+distinct, qui porte l'octet réel du GGUF. Une politique réseau qui n'autorise que
+`huggingface.co` laisse donc la résolution réussir puis le téléchargement échouer.
+
+Domaines à autoriser en sortie, en HTTPS (443) :
+
+| Domaine                                                                                                 | Rôle                                                     | Nécessité                                           |
+| ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- | --------------------------------------------------- |
+| `huggingface.co`                                                                                        | API `/api/models/{dépôt}` et redirection `/resolve/`     | obligatoire                                         |
+| `us.aws.cdn.hf.co`                                                                                      | stockage Xet, région US, cible effective des 302 actuels | obligatoire en pratique                             |
+| `eu.aws.cdn.hf.co`                                                                                      | stockage Xet, région EU                                  | selon la région servie                              |
+| `cdn-lfs.huggingface.co`, `cdn-lfs-us-1.huggingface.co`, `cdn-lfs-eu-1.huggingface.co`, `cdn-lfs.hf.co` | anciens dépôts LFS non migrés vers Xet                   | recommandé                                          |
+| `cas-bridge.xethub.hf.co`, `transfer.xethub.hf.co`                                                      | protocole Xet natif                                      | inutile ici, `ollama.cpp` télécharge en HTTP simple |
+
+Vérifier l'ouverture réelle sans rien télécharger, en observant la redirection :
+
+```bash
+curl -sSIL -o /dev/null -w '%{http_code} %{url_effective}\n' \
+  https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf
+```
+
+Une réponse `200` sur une URL finale en `*.cdn.hf.co` prouve que la chaîne complète est ouverte.
+Un échec de connexion sur cette URL finale, alors que `huggingface.co` répond, désigne exactement
+l'hôte de stockage à autoriser.
+
+Côté `ollama.cpp`, aucune configuration supplémentaire n'est requise : `OLLAMACPP_HF_ENDPOINT`
+désigne uniquement l'API (`https://huggingface.co` par défaut), et le client suit les
+redirections. Un miroir interne se déclare en pointant cette variable vers lui.
+
+## État du projet
+
+Les quatre façades, le registre, le cycle de vie, l'ordonnanceur et le téléchargement sont
+implémentés et couverts par 775 tests, dont des tests d'API de bout en bout et une suite de
+conformité rejouant la logique d'`ollama-gateway`.
+
+La chaîne est vérifiée de bout en bout sur un **vrai `llama-server`** compilé depuis l'upstream,
+avec le **vrai binaire `ollama`** comme client, et sur un **vrai modèle entraîné**,
+`Qwen/Qwen2.5-0.5B-Instruct-GGUF` téléchargé depuis Hugging Face par `/api/pull`, qui répond
+juste, appelle des outils et boucle sur leurs résultats. La vision est vérifiée de la même
+manière, sur `ggml-org/SmolVLM-256M-Instruct-GGUF` et son projecteur : le modèle décrit
+correctement quatre couleurs distinctes, sur les quatre façades et depuis le CLI officiel.
+
+L'état réel, unité par unité, est tenu dans **`docs/BACKLOG.md`**, qui fait foi, une unité n'y
+passe `[x]` qu'après validation complète de sa Definition of Done.
+
+## Installation
+
+### Avec Docker (recommandé)
+
+L'image compile `llama-server` depuis l'upstream à une révision épinglée, puis installe le
+service. Aucune source de `llama.cpp` n'est vendorée dans ce dépôt.
+
+```bash
+cp .env.example .env.prod        # puis compléter
+./runProd
+```
+
+### Sans Docker
+
+```bash
+pip install -r requirements.txt
+export OLLAMACPP_LLAMA_SERVER_BIN=/chemin/vers/llama-server
+python -m ollamacpp
+```
+
+Le binaire `llama-server` se compile depuis les sources de `llama.cpp` :
+
+```bash
+cmake -S llama.cpp -B build -DCMAKE_BUILD_TYPE=Release -DLLAMA_BUILD_TOOLS=ON
+cmake --build build --target llama-server -j"$(nproc)"
+```
+
+## Commandes principales
+
+| Commande                                                                         | Effet                                                                    |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `./runDev`                                                                       | environnement de développement conteneurisé                              |
+| `./runStaging`                                                                   | environnement de staging (exige `.env.staging`)                          |
+| `./runProd`                                                                      | environnement de production (exige `.env.prod`)                          |
+| `python -m ollamacpp`                                                            | lancement direct, sans conteneur                                         |
+| `python scripts/seed.py --verify`                                                | installe un modèle de démonstration et vérifie l'inférence               |
+| `python scripts/make_test_model.py --output m.gguf`                              | génère un vrai GGUF minuscule, sans téléchargement                       |
+| `python scripts/make_test_image.py --output i.png --forme disque --couleur bleu` | génère une image de test pour vérifier la vision                         |
+| `pytest`                                                                         | suite de tests (les tests marqués `e2e` sont ignorés sans binaire amont) |
+| `pytest -m conformance`                                                          | conformité vis-à-vis d'`ollama-gateway` uniquement                       |
+| `OLLAMACPP_TEST_LLAMA_SERVER=/chemin/llama-server pytest -m e2e`                 | bout en bout sur le vrai `llama-server` et un vrai modèle                |
+| `OLLAMACPP_TEST_HF_PULL=1 … pytest tests/test_e2e_huggingface.py`                | pull réel depuis Hugging Face puis inférence (≈500 Mo, réseau requis)    |
+| `docker compose -f docker-compose.dev.yml down -v`                               | arrêt et réinitialisation des données locales                            |
+
+Il n'y a **pas d'étape de build** pour le service lui-même : c'est du Python pur. Le seul artefact
+compilé est `llama-server`, produit par l'image Docker ou fourni par l'exploitant.
+
+## Variables d'environnement
+
+Toutes les variables sont documentées dans **`.env.example`**, rôle, format, caractère
+obligatoire, valeur d'exemple non sensible. Les principales :
+
+| Variable                            | Défaut                 | Rôle                                                         |
+| ----------------------------------- | ---------------------- | ------------------------------------------------------------ |
+| `OLLAMACPP_PORT`                    | `11434`                | port d'écoute, celui qu'attendent les clients Ollama         |
+| `OLLAMACPP_MODELS`                  | `~/.ollama.cpp/models` | répertoire des blobs et manifests                            |
+| `OLLAMACPP_LLAMA_SERVER_BIN`        | `llama-server`         | binaire d'inférence                                          |
+| `OLLAMACPP_KEEP_ALIVE`              | `5m`                   | résidence par défaut (nombre = secondes, négatif = illimité) |
+| `OLLAMACPP_MAX_LOADED_MODELS`       | `3`                    | nombre maximal de modèles résidents                          |
+| `OLLAMACPP_MEMORY_LIMIT_BYTES`      | `0` (auto)             | budget mémoire de l'ordonnanceur                             |
+| `OLLAMACPP_MANAGEMENT_ENABLED`      | `true`                 | autorise `pull`/`create`/`copy`/`delete`/`blobs`             |
+| `OLLAMACPP_API_KEY`                 | vide                   | si défini, exige `Authorization: Bearer`                     |
+| `OLLAMACPP_REGISTRY_URL` / `_TOKEN` | vide                   | registre privé                                               |
+
+Les variables marquées SECRET dans `.env.example` ne doivent jamais être committées. Leur valeur
+est masquée dans les journaux, ce que vérifie un test dédié.
+
+## Structure du dépôt
+
+```text
+ollamacpp/
+  config.py errors.py names.py durations.py   configuration, erreurs, nommage, keep_alive
+  gguf.py observability.py backend.py         métadonnées GGUF, journal, pont llama-server
+  sources.py service.py app.py                téléchargement, assemblage, application ASGI
+  canonical/       représentation conversationnelle unique des quatre façades
+  storage/         magasin de blobs adressé par contenu, manifests
+  registry/        registre des modèles installés
+  runtime/         superviseur, capacités, cycle de vie, ordonnanceur, mémoire
+  api/             façades Ollama, OpenAI, Responses, Anthropic
+tests/             unitaires, intégration, API, conformité, contrat llama-server, pull HF réel
+scripts/seed.py            données de démonstration, via les vraies API
+scripts/make_test_model.py modèle GGUF de test, réellement chargeable
+scripts/make_test_image.py images PNG de test, sans dépendance externe
 docs/
-├── DAT.md                        # technical architecture
-├── BACKLOG.md                    # executable work units and status
-├── JOURNAL.md                    # investigations and decisions
-├── DESIGN_SYSTEM.md              # global P2Enjoy UI reference, when UI exists
-├── DESIGN_SYSTEM_APP.md          # local UI extension, when UI exists
-└── manual.md or manuals/         # when user documentation is required
+  ollama.cpp-architecture.md   document fondateur : audit, matrice, plan, risques
+  DAT.md                       dossier d'architecture technique
+  BACKLOG.md                   état réel du projet, unités OC-xxx (fait foi)
+  JOURNAL.md                   décisions et investigations
+  PROD_MIGRATIONS.md           contrat de déploiement
+  MODEL_CONFIG.md              manifest et pilotage de llama-server, référence complète
+  REGISTRY.md                  protocole du registre privé
+  manual.md                    manuel d'exploitation
+  DESIGN_SYSTEM.md             charte d'interface P2Enjoy
+Dockerfile  docker-compose.{dev,staging,prod}.yml  runDev runStaging runProd
+.env.example
+CHANGELOG.md  README.md
 ```
 
-Additional documents such as `docs/SCHEMA.md`, deployment procedures or inconsistency reports are added when the project requires them.
+## Limites connues
 
-## Project README contract
+* **Génération d'images non supportée.** `llama.cpp` ne génère pas d'images : les capacités
+  `ollama-image` (modèles `x/…`) et `openai-image` (`/v1/images/generations`) d'`ollama-gateway`
+  resteront non servies. Incompatibilité assumée et documentée.
+* **`POST /api/push` non implémenté.** Publier vers un registre distant n'a pas de sens sans
+  registre Ollama ; l'endpoint répondra un code et un message explicites.
+* **Endpoints de compte cloud Ollama hors périmètre** (`/api/me`, `/api/signout`,
+  `/api/experimental/*`), ainsi que les modèles distants fédérés (`remote_host`, `remote_model`).
+* **Layout de stockage inspiré d'Ollama, pas identique.** Un répertoire `~/.ollama` existant n'est
+  pas lu tel quel.
+* **Pas de GPU dans l'environnement de développement de référence** : le comportement d'offload et
+  l'occupation VRAM ne sont pas vérifiables localement. Suivi en risque R11.
+* **Le modèle de test intégré produit du charabia.** `scripts/make_test_model.py` génère un vrai
+  GGUF `llama` (~460 Kio) chargeable par `llama-server`, ce qui permet d'exécuter toute la suite
+  de bout en bout sans télécharger de modèle. Ses poids sont aléatoires : la chaîne complète est
+  vérifiée, mais pas la **qualité** des réponses. C'est pourquoi `tests/test_e2e_huggingface.py`
+  existe : sur un vrai modèle entraîné tiré de Hugging Face, il vérifie que la réponse est
+  **juste**, pas seulement bien formée. Il demande un accès réseau et se déclenche avec
+  `OLLAMACPP_TEST_HF_PULL=1`.
+* **`tool_choice: "required"` n'est pas honoré par `llama-server`** sur un tour succédant à un
+  résultat d'outil : le modèle répond en texte au lieu d'appeler l'outil. Vérifié en interrogeant
+  `llama-server` **directement**, sans `ollama.cpp` dans le chemin, la limite est en amont. Une
+  boucle d'agent doit donc conduire elle-même l'enchaînement plutôt que de compter sur la
+  contrainte.
+* **`/api/pull` n'accepte pas un chemin de fichier local** : ce n'est pas un nom de modèle Ollama
+  valide, et Ollama ne l'accepte pas davantage. Un GGUF local s'installe par
+  `POST /api/blobs/<digest>` puis `POST /api/create`.
+* **Pas de quantisation à la volée** dans `/api/create` : le GGUF doit être quantifié en amont.
+  L'endpoint répond `501` avec un message explicite plutôt que d'ignorer le champ.
 
-The downstream `README.md` is operational documentation.
+## Documentation
 
-It should document at least:
+| Document                          | Contenu                                                                                               |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `docs/ollama.cpp-architecture.md` | Audit des dépôts amont, matrice de compatibilité `ollama-gateway`, manques, interfaces, plan, risques |
+| `docs/DAT.md`                     | Composants, flux, données, interfaces, sécurité, déploiement                                          |
+| `docs/BACKLOG.md`                 | État réel, unité par unité                                                                            |
+| `docs/MODEL_CONFIG.md`            | Manifest, `runtime` et correspondance complète avec les drapeaux `llama-server`                       |
+| `docs/REGISTRY.md`                | Protocole du registre privé : résolution, artefacts, checksums, sécurité                              |
+| `docs/manual.md`                  | Manuel d'exploitation                                                                                 |
+| `docs/PROD_MIGRATIONS.md`         | Contrat de déploiement                                                                                |
+| `docs/JOURNAL.md`                 | Décisions structurantes et leurs justifications                                                       |
+| `CHANGELOG.md`                    | Changements non publiés et publiés                                                                    |
 
-- project purpose;
-- actual technology stack;
-- prerequisites;
-- installation and bootstrap;
-- development startup;
-- deterministic seed or fixture procedure;
-- test commands;
-- build command;
-- shutdown and reset procedures;
-- environment variables;
-- important repository structure;
-- known limitations.
+## Licence
 
-Humans, CI and scheduled workers should use documented commands rather than infer them from conventions.
-
-## Documentation driven workflow
-
-Documentation is part of the implementation contract.
-
-A validated decision is persisted before implementation. When the implementation changes reality, the corresponding documentation changes in the same work unit.
-
-```text
-specification
-    ↓
-backlog unit
-    ↓
-implementation
-    ↓
-tests and verification
-    ↓
-user and operational documentation
-```
-
-Implementation should remain traceable to the specification and backlog unit that justify it. Tests should identify the contract they verify rather than only the source file they execute.
-
-## Development workflow
-
-Work is organized into small, coherent and verifiable units.
-
-```text
-understand
-    ↓
-specify
-    ↓
-persist documentation
-    ↓
-implement
-    ↓
-run targeted tests
-    ↓
-verify real behavior
-    ↓
-update documentation and backlog
-    ↓
-commit and push
-```
-
-For scheduled ephemeral workers, `docs/CloudWorker.md` adds repository recovery, environment bootstrap, end of session verification and mandatory persistence through Git.
-
-## Verification model
-
-A task is not complete merely because code was generated or a build succeeded.
-
-Depending on the project, verification may include:
-
-- unit tests;
-- database tests;
-- API and integration tests;
-- E2E tests;
-- type checking;
-- production builds;
-- authorization checks that bypass the UI;
-- deterministic seed validation;
-- visual inspection of the running interface;
-- responsive and accessibility checks;
-- deployment validation.
-
-For UI work, automated tests do not replace observation of the real application through its canonical user journey.
-
-## Technology scope
-
-This base does not force one application stack.
-
-Its generic conventions support projects using combinations of:
-
-- Python;
-- C;
-- C++;
-- Node.js;
-- Deno;
-- React and Vite when appropriate;
-- containerized local environments when appropriate.
-
-The target project remains authoritative for actual language versions, package managers, databases, services and build tools.
-
-## What does not belong in this repository
-
-The global base should not accumulate product implementation details.
-
-Do not add application source code, domain models, project routes, screen structures, seed data, demonstration users, local environment variables, deployment topology, backlog items or application specific design exceptions merely because one project needs them.
-
-Before promoting a new rule into the base, use this test:
-
-> Can this rule be understood, applied and reused without knowing which product caused us to discover it?
-
-If not, keep it in the project companion documentation.
-
-If a project reveals a genuinely reusable principle, extract the abstract principle, remove all product context and only then promote it to the global base.
-
-## License
-
-This repository is distributed under the Mozilla Public License 2.0. See [`LICENSE`](LICENSE) for the complete terms.
+Voir `LICENSE`.

@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Lance l'environnement de STAGING de `ollama.cpp`.
+#
+# @spec docs/BACKLOG.md OC-091 « runDev / runStaging / runProd »
+# @spec docs/DAT.md §12 « Commandes »
+set -euo pipefail
+cd "$(dirname "$0")"
+if [[ ! -f .env.staging ]]; then
+  echo "erreur : .env.staging manquant — copier .env.example et le compléter" >&2
+  exit 2
+fi
+exec docker compose -f docker-compose.staging.yml "${@:-up --build -d}"
