@@ -6,6 +6,22 @@ Toutes les modifications notables de `ollama.cpp`.
 
 ### Corrigé
 
+- **Les appels d'outils fragmentés par le streaming sont réassemblés.** En flux, `llama-server`
+  découpe `function.arguments` en fragments de tokens répartis sur plusieurs chunks et corrélés
+  par `index` — `{`, puis `"id":"`, puis `document`, puis `-word`… Chaque fragment pris isolément
+  n'est pas du JSON valide.
+
+  `parse_chunk` les traitait comme des appels **complets** : un appel d'outil était émis par
+  fragment, aux arguments inexploitables (`{"_raw": "{"}`). Un agent qui reçoit cela rappelle
+  l'outil, reçoit à nouveau des miettes, et **boucle**. Constaté en production sur une seule
+  question : **5 422 appels à `ask_user` et 4 167 à `view_skill`**, 918 messages dans la dernière
+  requête, aucune réponse produite.
+
+  `chat_stream` accumule désormais les fragments par `index` et ne décode qu'à la clôture du flux
+  (`_ToolCallAssembler`). Les appels sortent en un seul delta, complets, tels que le modèle les a
+  formés. Correction faite au niveau du backend : les quatre façades — Ollama, OpenAI, Responses,
+  Anthropic — en bénéficient ensemble. Le texte, lui, reste streamé token par token.
+
 - **Les tubes de `llama-server` sont drainés en continu.** `stdout` et `stderr` étaient ouverts en
   `PIPE` sans jamais être lus — seul un échec de chargement en consommait 4 Kio. Un tube que
   personne ne vide se remplit (64 Kio sous Linux) et le fils se bloque alors sur son prochain

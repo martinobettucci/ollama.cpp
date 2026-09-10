@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from typing import Any
 
 import httpx
@@ -359,6 +360,67 @@ async def chat(client: httpx.AsyncClient, body: dict[str, Any], *, model: str) -
     return parse_response(payload, model=model)
 
 
+class _ToolCallAssembler:
+    """Réassemble les appels d'outils fragmentés par le streaming.
+
+    En flux, `llama-server` découpe `function.arguments` en fragments de tokens, répartis sur
+    plusieurs chunks et corrélés par `index` — `{`, puis `"id":"`, puis `document`, puis `-word`…
+    Chaque fragment pris isolément n'est pas du JSON valide.
+
+    Les traiter chunk par chunk produit **un appel d'outil par fragment**, aux arguments
+    inexploitables (`{"_raw": "{"}`), là où le modèle n'en a émis qu'un seul. Un agent qui reçoit
+    cela rappelle l'outil, reçoit à nouveau des fragments, et **boucle** : constaté en production,
+    5 422 appels à `ask_user` et 4 167 à `view_skill` pour une seule question, sans jamais aboutir.
+
+    On accumule donc par `index` et on ne décode qu'à la fin du flux.
+    """
+
+    __slots__ = ("_calls",)
+
+    def __init__(self) -> None:
+        self._calls: dict[int, dict[str, Any]] = {}
+
+    @property
+    def pending(self) -> bool:
+        return bool(self._calls)
+
+    def feed(self, raw: Any) -> None:
+        """Absorbe les `tool_calls` d'un chunk. Les champs vides ne remplacent jamais un acquis."""
+        if not isinstance(raw, list):
+            return
+        for position, item in enumerate(raw):
+            if not isinstance(item, dict):
+                continue
+            index = int(item.get("index", position))
+            slot = self._calls.setdefault(index, {"id": "", "name": "", "arguments": ""})
+            if item.get("id"):
+                slot["id"] = str(item["id"])
+            function = item.get("function") or {}
+            if function.get("name"):
+                slot["name"] = str(function["name"])
+            fragment = function.get("arguments")
+            if isinstance(fragment, str):
+                slot["arguments"] += fragment
+            elif isinstance(fragment, dict):
+                # Un amont non fragmenté peut livrer les arguments déjà décodés.
+                slot["arguments"] = json.dumps(fragment, ensure_ascii=False)
+
+    def drain(self) -> tuple[ToolCall, ...]:
+        """Rend les appels complets et se vide. Décodage seulement ici, sur la chaîne entière."""
+        calls = tuple(
+            ToolCall(
+                id=slot["id"],
+                name=slot["name"],
+                arguments=_parse_arguments(slot["arguments"]),
+                index=index,
+            )
+            for index, slot in sorted(self._calls.items())
+            if slot["name"]
+        )
+        self._calls.clear()
+        return calls
+
+
 async def chat_stream(
     client: httpx.AsyncClient, body: dict[str, Any]
 ) -> AsyncIterator[CanonicalDelta]:
@@ -366,7 +428,12 @@ async def chat_stream(
 
     Le flux SSE de `llama-server` se termine par `data: [DONE]`, qui n'est pas du JSON : il est
     reconnu explicitement plutôt que d'être traité comme une erreur de parsage.
+
+    Les appels d'outils sont **réassemblés** avant d'être émis (cf. `_ToolCallAssembler`) : ils
+    sortent en un seul delta, complets, au moment où le flux les clôt. Les façades en aval les
+    reçoivent donc tels que le modèle les a formés, et non en miettes.
     """
+    assembler = _ToolCallAssembler()
     try:
         async with client.stream("POST", "/v1/chat/completions", json=body) as response:
             if response.status_code >= 400:
@@ -382,8 +449,25 @@ async def chat_stream(
                     payload = json.loads(data)
                 except ValueError:
                     continue
-                if isinstance(payload, dict):
-                    yield parse_chunk(payload)
+                if not isinstance(payload, dict):
+                    continue
+
+                choice = (payload.get("choices") or [{}])[0]
+                choice = choice if isinstance(choice, dict) else {}
+                assembler.feed((choice.get("delta") or {}).get("tool_calls"))
+
+                delta = parse_chunk(payload)
+                # Les fragments viennent d'être absorbés : ce que `parse_chunk` en a tiré est
+                # partiel par construction, on ne le propage pas.
+                calls = assembler.drain() if delta.finish_reason is not None else ()
+                if delta.text or delta.reasoning or calls or delta.finish_reason is not None \
+                        or delta.usage is not None or delta.timings is not None:
+                    yield replace(delta, tool_calls=calls)
+
+            # Flux clos sans `finish_reason` explicite : ne pas perdre les appels en attente.
+            if assembler.pending:
+                yield CanonicalDelta(tool_calls=assembler.drain(),
+                                     finish_reason=FinishReason.TOOL_CALLS)
     except httpx.HTTPError as exc:
         raise UpstreamError("upstream inference server is unreachable") from exc
 
