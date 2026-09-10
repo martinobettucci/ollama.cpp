@@ -6,6 +6,31 @@ Toutes les modifications notables de `ollama.cpp`.
 
 ### Corrigé
 
+- **Un modèle qui vient de répondre n'est plus évincé.** Entre deux appels d'outils d'un même
+  échange, un modèle est IDLE pour l'ordonnanceur alors que la conversation continue : la façade
+  tient une requête HTTP ouverte et s'apprête à relancer. L'évincer coupe ce flux **en plein
+  chunk** — le client reçoit un corps incomplet, pas une erreur lisible.
+
+  Relevé en production : `event=eviction model=fast:latest reason=max_loaded_models
+  idle_seconds=11.265`, puis `TransferEncodingError: Not enough data to satisfy transfer length
+  header` chez le client **15 ms plus tard**.
+
+  Un délai de grâce (`OLLAMACPP_EVICTION_GRACE_S`, 30 s par défaut) rend inévinçable un modèle qui
+  a servi récemment. Un `keep_alive` expiré prime : ce modèle devait partir de toute façon.
+  L'ordonnanceur reste neutre par défaut (`0.0`) ; c'est la configuration du service qui décide.
+
+  **Limite assumée** : un outil qui attend l'utilisateur laisse le modèle inactif bien plus
+  longtemps — deux minutes côté Open WebUI. Couvrir ce cas par le délai bloquerait toute bascule
+  de modèle pendant ce temps. La couverture complète suppose que la façade signale qu'un échange
+  est en cours, ce que l'ordonnanceur ne peut pas deviner.
+
+- **« Place prise » et « ne tient pas » sont deux refus distincts.** Les deux rendaient
+  `not enough memory (N bytes required)`. L'utilisateur lisait que son modèle était trop gros,
+  alors qu'il lui suffisait de réessayer — la place était occupée par un modèle en train de
+  servir, qu'on refuse d'évincer pour ne pas tuer sa requête. Le refus porte désormais le motif
+  `all_residents_busy` et le message le dit : *another model is currently serving requests and
+  cannot be evicted — retry in a moment*.
+
 - **Les appels d'outils fragmentés par le streaming sont réassemblés.** En flux, `llama-server`
   découpe `function.arguments` en fragments de tokens répartis sur plusieurs chunks et corrélés
   par `index` — `{`, puis `"id":"`, puis `document`, puis `-word`… Chaque fragment pris isolément

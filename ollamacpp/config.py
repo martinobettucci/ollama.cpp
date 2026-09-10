@@ -101,6 +101,8 @@ class Config:
     default_keep_alive: KeepAlive = DEFAULT_KEEP_ALIVE
     max_loaded_models: int = 3
     memory_limit_bytes: int = 0  # 0 = déduit de la mémoire de l'hôte
+    #: Délai pendant lequel un modèle qui vient de répondre reste inévinçable (cf. scheduler).
+    eviction_grace_s: int = 30
     memory_safety_margin: float = 0.10
     default_context: int = 4096
 
@@ -155,6 +157,7 @@ class Config:
             default_keep_alive=default_keep_alive,
             max_loaded_models=_env_int("OLLAMACPP_MAX_LOADED_MODELS", 3, minimum=1),
             memory_limit_bytes=_env_int("OLLAMACPP_MEMORY_LIMIT_BYTES", 0, minimum=0),
+            eviction_grace_s=_env_int("OLLAMACPP_EVICTION_GRACE_S", 30, minimum=0),
             memory_safety_margin=margin,
             default_context=_env_int("OLLAMACPP_DEFAULT_CONTEXT", 4096, minimum=1),
             download_concurrency=_env_int("OLLAMACPP_DOWNLOAD_CONCURRENCY", 2, minimum=1),

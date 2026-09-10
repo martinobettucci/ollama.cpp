@@ -56,6 +56,7 @@ class Service:
                 safety_margin=config.memory_safety_margin,
             ),
             max_loaded_models=config.max_loaded_models,
+            eviction_grace_s=config.eviction_grace_s,
         )
 
         self.supervisor = LlamaServerSupervisor(

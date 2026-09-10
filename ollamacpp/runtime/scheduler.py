@@ -92,12 +92,39 @@ REASON_MEMORY_PRESSURE = "memory_pressure"
 REASON_SLOT_PRESSURE = "max_loaded_models"
 REASON_KEEP_ALIVE_EXPIRED = "keep_alive_expired"
 REASON_INSUFFICIENT_MEMORY = "insufficient_memory"
+#: Aucun résident n'était évinçable — tous servaient une requête ou venaient d'en servir une.
+#: Distinct de `insufficient_memory` : le modèle demandé tiendrait, c'est la place qui manque
+#: maintenant. Le message rendu à l'appelant, et la conduite à tenir, en dépendent.
+REASON_ALL_BUSY = "all_residents_busy"
+
+#: Un modèle qui vient de répondre n'est pas évinçable, même sans requête active à l'instant T.
+#:
+#: Entre deux appels d'outils d'un même échange, un modèle est IDLE du point de vue de
+#: l'ordonnanceur alors que la conversation continue : la façade tient une requête HTTP ouverte et
+#: s'apprête à relancer. L'évincer coupe ce flux en plein chunk — le client reçoit un corps
+#: incomplet, pas un message d'erreur. Constaté en production : éviction à `idle_seconds=11.3`,
+#: `TransferEncodingError` chez le client 15 ms plus tard.
+#:
+#: Ce délai est un substitut : l'ordonnanceur ne peut pas savoir qu'un échange est en cours. Trop
+#: court, il ne protège rien ; trop long, il bloque les bascules de modèle légitimes.
+#:
+#: Valeur par défaut du SERVICE, pas de l'ordonnanceur : ce dernier reste neutre (`0.0`) pour
+#: rester pilotable, et c'est la configuration qui décide.
+#:
+#: **Ce que ce délai ne couvre pas.** Un outil qui attend l'utilisateur — une question posée dans
+#: l'interface — laisse le modèle inactif bien plus longtemps (deux minutes côté Open WebUI). Le
+#: délai le protégerait au prix de bloquer toute bascule de modèle pendant ce temps : le remède
+#: serait pire. La couverture complète suppose que la façade signale qu'un échange est en cours,
+#: ce que l'ordonnanceur ne peut pas deviner.
+EVICTION_GRACE_S = 30.0
 
 
 class ModelScheduler:
     """Décide de la résidence des modèles."""
 
-    def __init__(self, *, memory_budget_bytes: int, max_loaded_models: int) -> None:
+    def __init__(self, *, memory_budget_bytes: int, max_loaded_models: int,
+                 eviction_grace_s: float = 0.0) -> None:
+        self._grace_s = max(0.0, float(eviction_grace_s))
         self._budget = memory_budget_bytes
         self._max_loaded = max_loaded_models
 
@@ -167,12 +194,16 @@ class ModelScheduler:
         )
 
         if not satisfied:
-            # Distinguer les deux impossibilités : « aucun candidat évinçable » (tout est BUSY)
-            # et « le modèle ne tient pas, même seul ». Le message d'erreur en dépend.
+            # Distinguer les deux impossibilités : « aucun candidat évinçable » (tout sert, ou
+            # vient de servir) et « le modèle ne tient pas, même seul ». Le message rendu à
+            # l'utilisateur en dépend : dans le premier cas il suffit de réessayer, dans le second
+            # la configuration est à revoir. Les confondre envoie sur une fausse piste.
+            alone = self._is_satisfied(residents_count=0, available=self._budget or math.inf,
+                                       required=required_bytes)
             return AdmissionPlan(
                 admitted=False,
                 evictions=(),
-                reason=REASON_INSUFFICIENT_MEMORY,
+                reason=REASON_ALL_BUSY if alone else REASON_INSUFFICIENT_MEMORY,
                 required_bytes=required_bytes,
                 available_bytes=int(available) if available != math.inf else 0,
             )
@@ -206,7 +237,10 @@ class ModelScheduler:
         eligible = [
             resident
             for resident in residents
-            if not resident.is_busy and resident.name != requested
+            if not resident.is_busy
+            and resident.name != requested
+            # Un `keep_alive` expiré prime : ce modèle devait partir de toute façon.
+            and (resident.keep_alive_expired or resident.idle_seconds >= self._grace_s)
         ]
         return sorted(
             eligible,

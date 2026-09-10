@@ -27,6 +27,7 @@ from ollamacpp.runtime.scheduler import (
     REASON_INSUFFICIENT_MEMORY,
     REASON_KEEP_ALIVE_EXPIRED,
     REASON_MEMORY_PRESSURE,
+    REASON_ALL_BUSY,
     REASON_SLOT_PRESSURE,
     ModelScheduler,
     ResidentInfo,
@@ -284,3 +285,66 @@ class TestBudget:
         """Vérification que la sonde réelle fonctionne sur cet hôte, sans figer de valeur."""
         total = HostMemoryProbe().total_bytes()
         assert total > 0
+
+class TestGraceAvantEviction:
+    """Un modèle qui vient de répondre n'est pas évinçable, même sans requête active.
+
+    Entre deux appels d'outils d'un même échange, il est IDLE pour l'ordonnanceur alors que la
+    conversation continue : la façade tient une requête HTTP ouverte et va relancer. L'évincer
+    coupe le flux en plein chunk — le client reçoit un corps incomplet, pas une erreur lisible.
+    Constaté en production : éviction à `idle_seconds=11.3`, erreur de transfert chez le client
+    15 ms plus tard.
+    """
+
+    def test_un_modele_tout_juste_actif_est_protege(self):
+        """Inactif depuis 11 s, grâce à 45 s : il reste, la demande est refusée proprement."""
+        plan = ModelScheduler(memory_budget_bytes=10 * GO, max_loaded_models=1,
+                              eviction_grace_s=45.0).plan(
+            name="b", required_bytes=GO, residents=[resident("a", inactivite=11.3)]
+        )
+        assert not plan.admitted
+        # Le modèle demandé TIENDRAIT tout seul : ce n'est pas un problème de mémoire.
+        assert plan.reason == REASON_ALL_BUSY
+
+    def test_passe_la_grace_l_eviction_reprend(self):
+        """Au-delà du délai, le comportement d'origine revient : on évince et on admet."""
+        plan = ModelScheduler(memory_budget_bytes=10 * GO, max_loaded_models=1,
+                              eviction_grace_s=45.0).plan(
+            name="b", required_bytes=GO, residents=[resident("a", inactivite=60.0)]
+        )
+        assert plan.admitted and plan.needs_eviction
+
+    def test_keep_alive_expire_prime_sur_la_grace(self):
+        """Un modèle dont le `keep_alive` a expiré devait partir : la grâce ne le retient pas."""
+        plan = ModelScheduler(memory_budget_bytes=10 * GO, max_loaded_models=1,
+                              eviction_grace_s=45.0).plan(
+            name="b", required_bytes=GO,
+            residents=[resident("a", inactivite=1.0, expire=True)]
+        )
+        assert plan.admitted and plan.needs_eviction
+
+    def test_grace_nulle_par_defaut(self):
+        """L'ordonnanceur reste neutre : c'est la configuration du service qui décide."""
+        plan = ModelScheduler(memory_budget_bytes=10 * GO, max_loaded_models=1).plan(
+            name="b", required_bytes=GO, residents=[resident("a", inactivite=0.0)]
+        )
+        assert plan.admitted and plan.needs_eviction
+
+
+class TestMotifDuRefus:
+    """« Place prise » et « ne tient pas » sont deux pannes distinctes, deux messages distincts.
+
+    Les confondre envoie chercher au mauvais endroit : l'utilisateur lit « not enough memory » et
+    croit son modèle trop gros, alors qu'il lui suffisait de réessayer."""
+
+    def test_place_prise_par_un_modele_occupe(self):
+        plan = ModelScheduler(memory_budget_bytes=10 * GO, max_loaded_models=1).plan(
+            name="b", required_bytes=GO, residents=[resident("a", actives=1)]
+        )
+        assert not plan.admitted and plan.reason == REASON_ALL_BUSY
+
+    def test_modele_trop_gros_meme_seul(self):
+        plan = ModelScheduler(memory_budget_bytes=2 * GO, max_loaded_models=1).plan(
+            name="b", required_bytes=9 * GO, residents=[resident("a", actives=1)]
+        )
+        assert not plan.admitted and plan.reason == REASON_INSUFFICIENT_MEMORY

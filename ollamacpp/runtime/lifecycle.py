@@ -55,7 +55,7 @@ from ..registry import ModelRegistry, RegisteredModel
 from ..storage.manifests import RuntimeConfig
 from .capabilities import DetectedCapabilities, context_length, detect
 from .memory import MemoryEstimate, estimate_model_memory
-from .scheduler import ModelScheduler, ResidentInfo
+from .scheduler import ModelScheduler, ResidentInfo, REASON_ALL_BUSY
 from .supervisor import LlamaServerInstance, LlamaServerSupervisor
 
 
@@ -272,6 +272,14 @@ class ModelLifecycleManager:
                 name=key, required_bytes=estimate.total_bytes, residents=self._resident_infos()
             )
             if not plan.admitted:
+                # Deux échecs très différents, deux messages : « réessaie » quand la place est
+                # prise par un modèle qui travaille, « revois la configuration » quand le modèle
+                # ne tient pas même seul. Un message unique ferait chercher au mauvais endroit.
+                if plan.reason == REASON_ALL_BUSY:
+                    raise UpstreamError(
+                        f"cannot load model '{key}': another model is currently serving requests "
+                        f"and cannot be evicted — retry in a moment"
+                    )
                 raise UpstreamError(
                     f"cannot load model '{key}': not enough memory "
                     f"({estimate.total_bytes} bytes required)"
